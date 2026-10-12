@@ -81,6 +81,17 @@ function loadOAuth2Client() {
         clientId = c.client_id;
         clientSecret = c.client_secret;
       }
+    } else if (process.env.GOOGLE_CREDENTIALS_JSON) {
+      try {
+        const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+        const c = creds.web || creds.installed;
+        if (c) {
+          clientId = c.client_id;
+          clientSecret = c.client_secret;
+        }
+      } catch (e) {
+        console.error('[Google Sheets] Error parsing GOOGLE_CREDENTIALS_JSON:', e.message);
+      }
     } else if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
       clientId = process.env.GOOGLE_CLIENT_ID;
       clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -91,13 +102,26 @@ function loadOAuth2Client() {
       return false;
     }
 
-    oauth2Client = new google.auth.OAuth2(clientId, clientSecret, REDIRECT_URI);
+    const redirectUri = process.env.RENDER_EXTERNAL_URL
+      ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')}/oauth2callback`
+      : (process.env.GOOGLE_REDIRECT_URI || REDIRECT_URI);
+
+    oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 
     if (fs.existsSync(TOKEN_PATH)) {
       const token = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
       oauth2Client.setCredentials(token);
       sheetsService = google.sheets({ version: 'v4', auth: oauth2Client });
       console.log('[Google Sheets] Loaded saved OAuth token.');
+    } else if (process.env.GOOGLE_TOKEN_JSON) {
+      try {
+        const token = JSON.parse(process.env.GOOGLE_TOKEN_JSON);
+        oauth2Client.setCredentials(token);
+        sheetsService = google.sheets({ version: 'v4', auth: oauth2Client });
+        console.log('[Google Sheets] Loaded OAuth token from GOOGLE_TOKEN_JSON env var.');
+      } catch (e) {
+        console.error('[Google Sheets] Error parsing GOOGLE_TOKEN_JSON:', e.message);
+      }
     }
 
     return true;
@@ -190,6 +214,8 @@ let activeSpreadsheetId = null;
 const SPREADSHEET_ID_PATH = path.join(process.cwd(), 'active-spreadsheet-id.txt');
 if (fs.existsSync(SPREADSHEET_ID_PATH)) {
   activeSpreadsheetId = fs.readFileSync(SPREADSHEET_ID_PATH, 'utf8').trim();
+} else if (process.env.SPREADSHEET_ID) {
+  activeSpreadsheetId = process.env.SPREADSHEET_ID.trim();
 }
 
 function saveSpreadsheetId(id) {
