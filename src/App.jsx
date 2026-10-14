@@ -54,6 +54,7 @@ export default function PawfitDesk() {
   
   // ── Google Sheets state ──────────────────────────────────────────────────────
   const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleUser, setGoogleUser]           = useState(null); // { name, email, picture }
   const [sheetUrl, setSheetUrl] = useState(null);
   const [sheetSyncing, setSheetSyncing] = useState(false);
   const [sheetToast, setSheetToast] = useState(null); // { type: 'success'|'error', msg }
@@ -95,6 +96,7 @@ export default function PawfitDesk() {
       .then(r => r.json())
       .then(data => {
         setGoogleConnected(data.connected);
+        if (data.user) setGoogleUser(data.user);
         if (data.connected) fetchSheetInfo();
       })
       .catch(() => {});
@@ -184,6 +186,7 @@ export default function PawfitDesk() {
   async function disconnectGoogle() {
     await fetch(`${API_URL}/auth/google-disconnect`, { method: 'POST' }).catch(() => {});
     setGoogleConnected(false);
+    setGoogleUser(null);
     setSheetUrl(null);
   }
 
@@ -293,8 +296,9 @@ export default function PawfitDesk() {
     });
 
     // Google auth success from backend (popup callback)
-    socket.on('google-auth-success', () => {
+    socket.on('google-auth-success', (payload) => {
       setGoogleConnected(true);
+      if (payload?.user) setGoogleUser(payload.user);
       fetchSheetInfo();
       showSheetToast('success', 'Google Sheets connected! ✓');
     });
@@ -966,52 +970,99 @@ export default function PawfitDesk() {
 
             {/* Modal Content */}
             <div className="p-4 sm:p-5 space-y-5">
-              {/* Status Section */}
-              <div className="bg-black/50 border border-white/5 rounded-xl p-3.5 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <div className={`h-2 w-2 rounded-full ${googleConnected ? 'bg-emerald-500 animate-pulse' : 'bg-zinc-600'}`} />
-                    <span className="text-xs font-semibold text-white">
-                      {googleConnected ? 'Google Account Connected' : 'No Account Connected'}
-                    </span>
-                  </div>
-                  {googleConnected && sheetUrl && (
-                    <a 
-                      href={sheetUrl} 
-                      target="_blank" 
-                      rel="noreferrer" 
-                      className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1 mt-1 font-medium"
-                    >
-                      Open Active Spreadsheet <ExternalLink size={10} />
-                    </a>
-                  )}
-                </div>
 
-                {googleConnected ? (
-                  <button
-                    onClick={disconnectGoogle}
-                    className="flex items-center gap-1 text-xs text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/10 px-3 py-1.5 rounded-lg transition-colors font-medium"
-                  >
-                    <LogOut size={12} /> Disconnect
-                  </button>
+              {/* ── Google Account Card ─────────────────────────── */}
+              <div className="bg-black/50 border border-white/5 rounded-xl p-3.5">
+                {googleConnected && googleUser ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {googleUser.picture ? (
+                        <img
+                          src={googleUser.picture}
+                          alt={googleUser.name}
+                          className="w-10 h-10 rounded-full border-2 border-emerald-500/40 shrink-0"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                          <span className="text-emerald-400 font-bold text-sm">
+                            {googleUser.name?.[0]?.toUpperCase() || 'G'}
+                          </span>
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-white truncate">{googleUser.name}</p>
+                        <p className="text-[11px] text-zinc-400 truncate">{googleUser.email}</p>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          <span className="text-[10px] text-emerald-400 font-medium">Connected to Sheets</span>
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={disconnectGoogle}
+                      className="flex items-center gap-1 text-xs text-rose-400 hover:text-rose-300 border border-rose-500/20 hover:border-rose-500/40 bg-rose-500/10 px-3 py-1.5 rounded-lg transition-colors font-medium shrink-0"
+                    >
+                      <LogOut size={12} /> Sign Out
+                    </button>
+                  </div>
+                ) : googleConnected ? (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                      <span className="text-xs font-semibold text-white">Google Account Connected</span>
+                    </div>
+                    <button
+                      onClick={disconnectGoogle}
+                      className="flex items-center gap-1 text-xs text-rose-400 hover:text-rose-300 border border-rose-500/20 bg-rose-500/10 px-3 py-1.5 rounded-lg transition-colors font-medium"
+                    >
+                      <LogOut size={12} /> Sign Out
+                    </button>
+                  </div>
                 ) : (
-                  <button
-                    onClick={connectGoogle}
-                    className="flex items-center gap-1.5 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 px-3.5 py-1.5 rounded-lg font-semibold transition-all shadow-[0_0_15px_rgba(16,185,129,0.15)]"
-                  >
-                    Sign in with Google
-                  </button>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2 w-2 rounded-full bg-zinc-600" />
+                      <span className="text-xs font-semibold text-zinc-400">No Account Connected</span>
+                    </div>
+                    <button
+                      onClick={connectGoogle}
+                      className="flex items-center gap-1.5 text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 px-3.5 py-1.5 rounded-lg font-semibold transition-all shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+                    >
+                      Sign in with Google
+                    </button>
+                  </div>
                 )}
               </div>
 
-              {/* Custom Spreadsheet Link / ID */}
+              {/* ── Daily Sheet Info ───────────────────────────────── */}
+              {googleConnected && (
+                <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3.5 space-y-1.5">
+                  <p className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
+                    <Sheet size={13} /> Auto Daily Worksheet
+                  </p>
+                  <p className="text-[11px] text-zinc-300 leading-relaxed">
+                    Every pin automatically creates a new worksheet for today:<br />
+                    <span className="font-mono text-emerald-300 text-[11px] bg-black/40 px-2 py-0.5 rounded mt-1 inline-block">
+                      tiktok sales-{(() => { const n=new Date(); return `${String(n.getMonth()+1).padStart(2,'0')}.${String(n.getDate()).padStart(2,'0')}.${String(n.getFullYear()).slice(-2)}`; })()}
+                    </span>
+                  </p>
+                  {sheetUrl && (
+                    <a href={sheetUrl} target="_blank" rel="noreferrer"
+                      className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1 font-medium mt-1">
+                      Open Spreadsheet <ExternalLink size={10} />
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {/* ── Custom Spreadsheet Link / ID ────────────────────── */}
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
                   <Link2 size={13} className="text-emerald-400" />
-                  Link Any Google Sheet URL or ID:
+                  Link a Google Sheet (paste URL or ID):
                 </label>
                 <p className="text-[11px] text-zinc-400">
-                  Paste the full link of any Google Sheet from your phone or browser. Ensure your Google account has edit access.
+                  Paste any existing Sheet URL. New pins will be added to today's dated worksheet inside it.
                 </p>
                 <div className="flex gap-2 pt-1">
                   <input
@@ -1031,7 +1082,7 @@ export default function PawfitDesk() {
                 </div>
               </div>
 
-              {/* Sync Controls */}
+              {/* ── Sync Controls ─────────────────────────────────── */}
               {googleConnected && (
                 <div className="pt-2 border-t border-white/5 flex items-center justify-between">
                   <div>

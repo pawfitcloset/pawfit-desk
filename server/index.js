@@ -64,11 +64,16 @@ const io = new Server(server, {
 // ─── Google OAuth2 Setup ──────────────────────────────────────────────────────
 let oauth2Client = null;
 let sheetsService = null;
+let googleUser = null; // { email, name, picture }
 
 const CREDENTIALS_PATH = path.join(process.cwd(), 'google-credentials.json');
 const TOKEN_PATH = path.join(process.cwd(), 'google-token.json');
 const REDIRECT_URI = 'http://localhost:3001/oauth2callback';
-const SCOPES = ['https://www.googleapis.com/auth/spreadsheets'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/userinfo.email',
+  'https://www.googleapis.com/auth/userinfo.profile'
+];
 
 function loadOAuth2Client() {
   try {
@@ -161,7 +166,18 @@ app.get('/oauth2callback', async (req, res) => {
     fs.writeFileSync(TOKEN_PATH, JSON.stringify(tokens, null, 2), 'utf8');
     sheetsService = google.sheets({ version: 'v4', auth: oauth2Client });
     console.log('[Google Sheets] OAuth2 token saved.');
-    io.emit('google-auth-success');
+
+    // Fetch user profile
+    try {
+      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+      const { data } = await oauth2.userinfo.get();
+      googleUser = { email: data.email, name: data.name, picture: data.picture };
+      console.log('[Google] Logged in as:', googleUser.email);
+    } catch (e) {
+      console.warn('[Google] Could not fetch user profile:', e.message);
+    }
+
+    io.emit('google-auth-success', { user: googleUser });
     res.send('<html><body style="font-family:sans-serif;background:#050505;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><h2>✅ Google Sheets connected! You can close this tab.</h2><script>window.close();</script></body></html>');
   } catch (err) {
     console.error('[Google Sheets] OAuth callback error:', err.message);
@@ -170,7 +186,11 @@ app.get('/oauth2callback', async (req, res) => {
 });
 
 app.get('/auth/google-status', (req, res) => {
-  res.json({ connected: !!sheetsService });
+  res.json({ connected: !!sheetsService, user: googleUser || null });
+});
+
+app.get('/auth/google-user', (req, res) => {
+  res.json({ user: googleUser || null });
 });
 
 app.post('/auth/google-disconnect', async (req, res) => {
@@ -179,6 +199,7 @@ app.post('/auth/google-disconnect', async (req, res) => {
       await oauth2Client.revokeCredentials().catch(() => {});
     }
     sheetsService = null;
+    googleUser = null;
     if (fs.existsSync(TOKEN_PATH)) fs.unlinkSync(TOKEN_PATH);
     console.log('[Google Sheets] Disconnected.');
     res.json({ ok: true });
@@ -221,6 +242,86 @@ if (fs.existsSync(SPREADSHEET_ID_PATH)) {
 function saveSpreadsheetId(id) {
   activeSpreadsheetId = id;
   fs.writeFileSync(SPREADSHEET_ID_PATH, id, 'utf8');
+}
+
+// ── Daily headers for the dated worksheet ──────────────────────────────────────
+const DAILY_HEADERS = ['Buyer Name', 'Username', 'Code', 'Price (₱)', 'Time'];
+
+/**
+ * Returns today's worksheet name: "tiktok sales-MM.DD.YY"
+ * e.g. "tiktok sales-10.14.26"
+ */
+function getDailySheetName() {
+  const now = new Date();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const yy = String(now.getFullYear()).slice(-2);
+  return `tiktok sales-${mm}.${dd}.${yy}`;
+}
+
+/**
+ * Ensures the active spreadsheet has a worksheet for today.
+ * If not, creates it and writes the header row.
+ * Returns { spreadsheetId, sheetName }.
+ */
+async function ensureDailySheet(spreadsheetId) {
+  if (!sheetsService) throw new Error('Not authenticated with Google Sheets.');
+
+  const sheetName = getDailySheetName();
+
+  // Create the spreadsheet if we don't have one yet
+  if (!spreadsheetId) {
+    const created = await sheetsService.spreadsheets.create({
+      requestBody: {
+        properties: { title: 'Pawfit Closet TikTok Sales' },
+        sheets: [{ properties: { title: sheetName } }]
+      }
+    });
+    spreadsheetId = created.data.spreadsheetId;
+    console.log(`[Sheets] Created new spreadsheet: ${spreadsheetId}`);
+
+    // Write headers on the new sheet
+    await sheetsService.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${sheetName}'!A1:E1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [DAILY_HEADERS] }
+    });
+
+    return { spreadsheetId, sheetName };
+  }
+
+  // Check if today's sheet already exists
+  let meta;
+  try {
+    meta = await sheetsService.spreadsheets.get({ spreadsheetId });
+  } catch (err) {
+    console.warn('[Sheets] Cannot access spreadsheet, creating a new one:', err.message);
+    return ensureDailySheet(null);
+  }
+
+  const existing = (meta.data.sheets || []).map(s => s.properties.title);
+
+  if (!existing.includes(sheetName)) {
+    // Add today's sheet
+    await sheetsService.spreadsheets.batchUpdate({
+      spreadsheetId,
+      requestBody: {
+        requests: [{ addSheet: { properties: { title: sheetName } } }]
+      }
+    });
+    console.log(`[Sheets] Created worksheet: "${sheetName}"`);
+
+    // Write headers
+    await sheetsService.spreadsheets.values.update({
+      spreadsheetId,
+      range: `'${sheetName}'!A1:E1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: [DAILY_HEADERS] }
+    });
+  }
+
+  return { spreadsheetId, sheetName };
 }
 
 /**
@@ -423,20 +524,22 @@ async function syncBuyerSummaryTab(spreadsheetId, orders = [], dpRecords = {}) {
 }
 
 /**
- * Automatically appends a raw order to 'Raw Orders' and updates 'Buyer Summary'
+ * Automatically appends an order to today's daily worksheet ("tiktok sales-MM.DD.YY")
+ * and also keeps the Buyer Summary tab updated.
  */
 async function autoAppendOrder(order, dpAmount = 0, currentOrders = null, currentDpRecords = null) {
   if (!sheetsService) return;
   try {
-    activeSpreadsheetId = await ensureSheet(activeSpreadsheetId);
-    saveSpreadsheetId(activeSpreadsheetId);
+    // 1. Ensure spreadsheet exists and get/create today's dated sheet
+    const { spreadsheetId, sheetName } = await ensureDailySheet(activeSpreadsheetId);
+    if (spreadsheetId !== activeSpreadsheetId) {
+      saveSpreadsheetId(spreadsheetId);
+    }
 
-    const today = new Date().toLocaleDateString('en-PH');
-
-    // 1. Append single item to 'Raw Orders'
+    // 2. Append row to today's dated worksheet
     await sheetsService.spreadsheets.values.append({
-      spreadsheetId: activeSpreadsheetId,
-      range: "'Raw Orders'!A:F",
+      spreadsheetId,
+      range: `'${sheetName}'!A:E`,
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
       requestBody: {
@@ -445,15 +548,14 @@ async function autoAppendOrder(order, dpAmount = 0, currentOrders = null, curren
           order.username,
           order.code,
           order.amount,
-          order.time,
-          today
+          order.time
         ]]
       }
     });
 
-    console.log(`[Google Sheets] Order ${order.code} appended to 'Raw Orders'.`);
+    console.log(`[Sheets] Order ${order.code} → "${sheetName}"`);
 
-    // 2. Refresh 'Buyer Summary'
+    // 3. Also keep the Buyer Summary tab refreshed (aggregate across all orders today)
     let ordersToSummarize = currentOrders;
     if (!ordersToSummarize || ordersToSummarize.length === 0) {
       try {
@@ -462,11 +564,11 @@ async function autoAppendOrder(order, dpAmount = 0, currentOrders = null, curren
         ordersToSummarize = [order];
       }
     }
-
     const dpToUse = currentDpRecords || (order.username ? { [order.username]: dpAmount } : {});
-    await syncBuyerSummaryTab(activeSpreadsheetId, ordersToSummarize, dpToUse);
+    await syncBuyerSummaryTab(spreadsheetId, ordersToSummarize, dpToUse);
   } catch (err) {
-    console.error('[Google Sheets] autoAppendOrder error:', err.message);
+    console.error('[Sheets] autoAppendOrder error:', err.message);
+
   }
 }
 
