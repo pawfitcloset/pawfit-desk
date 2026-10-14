@@ -224,7 +224,7 @@ export async function printInvoiceNiimbot(client, order) {
   const printheadPixels = meta?.printheadPixels || 384;
   const scale = printheadPixels / 384;
   const width = printheadPixels;
-  const height = Math.round(170 * scale);
+  const height = Math.round(250 * scale);
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -240,12 +240,12 @@ export async function printInvoiceNiimbot(client, order) {
   // ── 1. Header: PAWFIT CLOSET ─────────────────────────────────────────────────
   ctx.textAlign = 'center';
   ctx.font = `bold ${Math.round(18 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(19 * scale));
+  ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(25 * scale));
 
   ctx.lineWidth = Math.round(2.5 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(8 * scale), Math.round(26 * scale));
-  ctx.lineTo(width - Math.round(8 * scale), Math.round(26 * scale));
+  ctx.moveTo(Math.round(8 * scale), Math.round(35 * scale));
+  ctx.lineTo(width - Math.round(8 * scale), Math.round(35 * scale));
   ctx.stroke();
 
   // ── 2. Buyer Name ─────────────────────────────────────────────────────────────
@@ -257,29 +257,29 @@ export async function printInvoiceNiimbot(client, order) {
   const buyerName = order.name || 'Anonymous';
   const fullBuyer = `${buyerLabel}${buyerName}`;
   autoFitText(ctx, fullBuyer, 'normal', 32, scale, maxW);
-  ctx.fillText(fullBuyer, padL, Math.round(50 * scale));
+  ctx.fillText(fullBuyer, padL, Math.round(65 * scale));
 
   // ── 3. Username ───────────────────────────────────────────────────────────────
   const username = (order.username || '').replace(/^@+/, '');
   const displayUser = username ? `@${username}` : '';
   if (displayUser) {
     autoFitText(ctx, displayUser, 'normal', 18, scale, maxW - Math.round(60 * scale));
-    ctx.fillText(displayUser, padL, Math.round(68 * scale));
+    ctx.fillText(displayUser, padL, Math.round(85 * scale));
   }
 
   // ── 4. Time — right-aligned same line as username ─────────────────────────────
   const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   ctx.textAlign = 'right';
   ctx.font = `normal ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(68 * scale));
+  ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(85 * scale));
   ctx.textAlign = 'left';
 
   // ── 5. Rounded box for CODE & PRICE ──────────────────────────────────────────
   ctx.lineWidth = Math.round(2 * scale);
   const boxX = Math.round(8 * scale);
-  const boxY = Math.round(76 * scale);
+  const boxY = Math.round(100 * scale);
   const boxW = width - Math.round(16 * scale);
-  const boxH = Math.round(72 * scale);
+  const boxH = Math.round(70 * scale);  // box bottom = 170
   const r = Math.round(6 * scale);
 
   ctx.beginPath();
@@ -295,7 +295,7 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.closePath();
   ctx.stroke();
 
-  // CODE row  (box bottom = 76+72 = 148)
+  // CODE row
   ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText('CODE', Math.round(22 * scale), boxY + Math.round(22 * scale));
   autoFitText(ctx, String(order.code), 'bold', 22, scale, boxW - Math.round(80 * scale));
@@ -307,9 +307,9 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.font = `bold ${Math.round(22 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(54 * scale));
 
-  // ── 6. Footer — 7px below box bottom (148+7=155 line, 148+17=165 text) ────────
-  const footerLineY = Math.round(155 * scale);
-  const footerY     = Math.round(165 * scale);
+  // ── 6. Footer ────────────────────────────────────────────────────────────────
+  const footerLineY = Math.round(180 * scale);
+  const footerY     = Math.round(190 * scale);
 
   ctx.lineWidth = Math.round(1.5 * scale);
   ctx.beginPath();
