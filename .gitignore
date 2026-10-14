@@ -27,7 +27,10 @@ dist-ssr
 google-credentials.json
 google-token.json
 active-spreadsheet-id.txt
+daily-spreadsheets.json
 orders.db*
 install_mingit.ps1
 Personal
 PUSH_TO_GITHUB.bat
+temp_receipt.txt
+
