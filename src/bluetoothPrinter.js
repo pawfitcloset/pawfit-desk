@@ -184,21 +184,67 @@ export async function printTest(printer) {
 // ─── NIIMBOT Specific Printing ────────────────────────────────────────────────
 
 /**
- * Helper to auto-fit bold text so long buyer names / usernames never get clipped
+ * Draws a cute filled paw print centered at (cx, cy) with a given size.
+ * size ≈ diameter of the main pad in px.
  */
-function renderBoldText(ctx, label, value, x, y, maxWidth, baseSize, scale) {
-  let size = baseSize;
-  ctx.font = `bold ${Math.round(size * scale)}px Arial, Helvetica, sans-serif`;
-  const fullText = `${label}${value}`;
-  while (ctx.measureText(fullText).width > maxWidth && size > 11) {
-    size -= 1;
-    ctx.font = `bold ${Math.round(size * scale)}px Arial, Helvetica, sans-serif`;
+function drawPawPrint(ctx, cx, cy, size) {
+  ctx.save();
+  ctx.fillStyle = '#000000';
+
+  // Main heart-shaped pad (two overlapping ellipses + a triangle)
+  const pw = size * 0.55;
+  const ph = size * 0.42;
+  ctx.beginPath();
+  ctx.ellipse(cx, cy + size * 0.08, pw, ph, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Four small round toe pads arranged in an arc above the main pad
+  const toes = [
+    { dx: -size * 0.44, dy: -size * 0.18 },
+    { dx: -size * 0.16, dy: -size * 0.40 },
+    { dx:  size * 0.16, dy: -size * 0.40 },
+    { dx:  size * 0.44, dy: -size * 0.18 },
+  ];
+  const tr = size * 0.19;
+  for (const t of toes) {
+    ctx.beginPath();
+    ctx.ellipse(cx + t.dx, cy + t.dy, tr, tr * 0.85, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
-  ctx.fillText(fullText, x, y);
+
+  ctx.restore();
+}
+
+/**
+ * Auto-fit text within maxWidth — shrinks font size until it fits.
+ * Returns the final pixel size used.
+ */
+function autoFitText(ctx, text, fontStyle, baseSize, scale, maxWidth) {
+  let size = baseSize;
+  ctx.font = `${fontStyle} ${Math.round(size * scale)}px Arial, Helvetica, sans-serif`;
+  while (ctx.measureText(text).width > maxWidth && size > 9) {
+    size -= 1;
+    ctx.font = `${fontStyle} ${Math.round(size * scale)}px Arial, Helvetica, sans-serif`;
+  }
+  return size;
 }
 
 /**
  * Prints a high-resolution label sticker on NIIMBOT B1 / B1 Pro / B21 / D110
+ *
+ * Layout (top → bottom):
+ *   ┌──────────────────────────────────┐
+ *   │  🐾  PAWFIT CLOSET  🐾           │  ← header with paw prints
+ *   ├──────────────────────────────────┤
+ *   │  [Big paw]  Maria Santos         │  ← HUGE buyer name (no bold label)
+ *   │             @mariasantos         │  ← username line (large, not bold)
+ *   │             10:35 AM             │  ← time (small, right of user)
+ *   ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
+ *   │  CODE:   23          (box)       │  ← code in smaller bold box
+ *   │  PRICE:  P129                    │
+ *   ├──────────────────────────────────┤
+ *   │  Thank you for shopping! 🐾      │  ← footer
+ *   └──────────────────────────────────┘
  */
 export async function printInvoiceNiimbot(client, order) {
   if (!client || !client.isConnected()) {
@@ -209,72 +255,134 @@ export async function printInvoiceNiimbot(client, order) {
   const printheadPixels = meta?.printheadPixels || 384;
   const scale = printheadPixels / 384;
   const width = printheadPixels;
-  const height = Math.round(250 * scale); // Optimized height for 30mm/40mm label
+  const height = Math.round(280 * scale);
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
 
-  // Background must be pure white
+  // White background
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
-
   ctx.fillStyle = '#000000';
   ctx.strokeStyle = '#000000';
 
-  // 1. Header: PAWFIT CLOSET
+  // ── 1. Header Row: paw + "PAWFIT CLOSET" + paw ──────────────────────────────
+  const headerPawSize = Math.round(12 * scale);
+  drawPawPrint(ctx, Math.round(20 * scale), Math.round(16 * scale), headerPawSize);
+  drawPawPrint(ctx, width - Math.round(20 * scale), Math.round(16 * scale), headerPawSize);
+
   ctx.textAlign = 'center';
-  ctx.font = `bold ${Math.round(18 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.font = `bold ${Math.round(17 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(22 * scale));
 
-  // 2. Divider line
-  ctx.lineWidth = Math.round(2 * scale);
+  // Thick divider under header
+  ctx.lineWidth = Math.round(2.5 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(10 * scale), Math.round(30 * scale));
-  ctx.lineTo(width - Math.round(10 * scale), Math.round(30 * scale));
+  ctx.moveTo(Math.round(8 * scale), Math.round(30 * scale));
+  ctx.lineTo(width - Math.round(8 * scale), Math.round(30 * scale));
   ctx.stroke();
 
-  // 3. Buyer & Username (Large, Bold, High-Visibility)
+  // ── 2. Large Paw Print (decorative, left side of buyer section) ──────────────
+  const bigPaw = Math.round(30 * scale);
+  drawPawPrint(ctx, Math.round(26 * scale), Math.round(62 * scale), bigPaw);
+
+  // ── 3. BUYER NAME — Big, not bold ────────────────────────────────────────────
   ctx.textAlign = 'left';
-  const maxWidth = width - Math.round(24 * scale);
-
-  // Large Bold Buyer Name
+  const maxBuyerWidth = width - Math.round(62 * scale); // leave room for paw on left
   const buyerName = order.name || 'Anonymous';
-  renderBoldText(ctx, 'BUYER: ', buyerName, Math.round(14 * scale), Math.round(54 * scale), maxWidth, 18, scale);
+  autoFitText(ctx, buyerName, 'normal', 28, scale, maxBuyerWidth);
+  ctx.fillText(buyerName, Math.round(56 * scale), Math.round(55 * scale));
 
-  // Large Bold Username & Time
-  const username = order.username || '';
+  // ── 4. USERNAME — Large, not bold, slightly smaller than name ────────────────
+  const username = (order.username || '').replace(/^@+/, '');
+  if (username) {
+    const maxUserWidth = width - Math.round(62 * scale);
+    autoFitText(ctx, `@${username}`, 'normal', 19, scale, maxUserWidth);
+    ctx.fillText(`@${username}`, Math.round(56 * scale), Math.round(82 * scale));
+  }
+
+  // ── 5. Time (small, right-aligned) ──────────────────────────────────────────
   const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  const userText = username ? `${username} (${orderTime})` : orderTime;
-  renderBoldText(ctx, 'USER:  ', userText, Math.round(14 * scale), Math.round(78 * scale), maxWidth, 16, scale);
+  ctx.textAlign = 'right';
+  ctx.font = `normal ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(orderTime, width - Math.round(10 * scale), Math.round(82 * scale));
+  ctx.textAlign = 'left';
 
-  // 4. Highlight Box for CODE & PRICE
+  // Thin dotted-style divider between buyer and code sections
+  ctx.lineWidth = Math.round(1 * scale);
+  ctx.setLineDash([Math.round(4 * scale), Math.round(3 * scale)]);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(8 * scale), Math.round(96 * scale));
+  ctx.lineTo(width - Math.round(8 * scale), Math.round(96 * scale));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // ── 6. CODE & PRICE — in a solid-border box, smaller than buyer name ─────────
   ctx.lineWidth = Math.round(2 * scale);
-  const boxTop = Math.round(92 * scale);
-  const boxHeight = Math.round(104 * scale);
-  ctx.strokeRect(Math.round(10 * scale), boxTop, width - Math.round(20 * scale), boxHeight);
+  const boxX = Math.round(8 * scale);
+  const boxY = Math.round(104 * scale);
+  const boxW = width - Math.round(16 * scale);
+  const boxH = Math.round(106 * scale);
 
-  // Large CODE (Changed from ITEM)
-  ctx.font = `bold ${Math.round(30 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(`CODE: ${order.code}`, Math.round(22 * scale), boxTop + Math.round(42 * scale));
+  // Rounded corner rect approximation
+  const r = Math.round(6 * scale);
+  ctx.beginPath();
+  ctx.moveTo(boxX + r, boxY);
+  ctx.lineTo(boxX + boxW - r, boxY);
+  ctx.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + r, r);
+  ctx.lineTo(boxX + boxW, boxY + boxH - r);
+  ctx.arcTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH, r);
+  ctx.lineTo(boxX + r, boxY + boxH);
+  ctx.arcTo(boxX, boxY + boxH, boxX, boxY + boxH - r, r);
+  ctx.lineTo(boxX, boxY + r);
+  ctx.arcTo(boxX, boxY, boxX + r, boxY, r);
+  ctx.closePath();
+  ctx.stroke();
 
-  // Large PRICE
-  ctx.font = `bold ${Math.round(26 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(`PRICE: P${order.amount}`, Math.round(22 * scale), boxTop + Math.round(84 * scale));
+  // CODE label (small caps label) + value
+  ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('CODE', Math.round(22 * scale), boxY + Math.round(28 * scale));
 
-  // 5. Divider & Footer
+  ctx.font = `bold ${Math.round(24 * scale)}px Arial, Helvetica, sans-serif`;
+  // autofit code value in case it's long
+  autoFitText(ctx, order.code, 'bold', 24, scale, boxW - Math.round(80 * scale));
+  ctx.fillText(order.code, Math.round(80 * scale), boxY + Math.round(30 * scale));
+
+  // Thin inner divider
   ctx.lineWidth = Math.round(1 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(10 * scale), Math.round(214 * scale));
-  ctx.lineTo(width - Math.round(10 * scale), Math.round(214 * scale));
+  ctx.moveTo(boxX + Math.round(6 * scale), boxY + Math.round(42 * scale));
+  ctx.lineTo(boxX + boxW - Math.round(6 * scale), boxY + Math.round(42 * scale));
   ctx.stroke();
 
-  ctx.textAlign = 'center';
-  ctx.font = `bold ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('Thank you for shopping! • TikTok Live', width / 2, Math.round(234 * scale));
+  // PRICE label + value
+  ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('PRICE', Math.round(22 * scale), boxY + Math.round(72 * scale));
 
-  // Encode canvas into Niimbot raster packet protocol
+  ctx.font = `bold ${Math.round(24 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(74 * scale));
+
+  // ── 7. Footer: thank you + small paw prints ───────────────────────────────────
+  const footerY = Math.round(232 * scale);
+
+  ctx.lineWidth = Math.round(1.5 * scale);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(8 * scale), Math.round(222 * scale));
+  ctx.lineTo(width - Math.round(8 * scale), Math.round(222 * scale));
+  ctx.stroke();
+
+  // tiny paw prints flanking the footer text
+  const footerPaw = Math.round(9 * scale);
+  drawPawPrint(ctx, Math.round(18 * scale), footerY - Math.round(4 * scale), footerPaw);
+  drawPawPrint(ctx, width - Math.round(18 * scale), footerY - Math.round(4 * scale), footerPaw);
+
+  ctx.textAlign = 'center';
+  ctx.font = `normal ${Math.round(10 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('Thank you for shopping! TikTok Live', width / 2, footerY);
+
+  // ── Encode & Send to Printer ─────────────────────────────────────────────────
   const encodedImage = ImageEncoder.encodeCanvas(
     canvas,
     PageColorType.SingleColor,
@@ -284,7 +392,7 @@ export async function printInvoiceNiimbot(client, order) {
   const taskType = client.getPrintTaskType() || 'B1';
   const printTask = client.protocol.newPrintTask(taskType, {
     totalPages: 1,
-    density: 5, // Maximum density for darkest, sharpest thermal print
+    density: 5,
     labelType: LabelType.WithGaps
   });
 
@@ -319,38 +427,45 @@ export async function testPrintNiimbot(client) {
 
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
-
   ctx.fillStyle = '#000000';
   ctx.strokeStyle = '#000000';
 
+  // Header paw prints + title
+  const hp = Math.round(12 * scale);
+  drawPawPrint(ctx, Math.round(18 * scale), Math.round(18 * scale), hp);
+  drawPawPrint(ctx, width - Math.round(18 * scale), Math.round(18 * scale), hp);
+
   ctx.textAlign = 'center';
-  ctx.font = `bold ${Math.round(22 * scale)}px sans-serif`;
-  ctx.fillText('PAWFIT DESK', width / 2, Math.round(30 * scale));
+  ctx.font = `bold ${Math.round(20 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('PAWFIT DESK', width / 2, Math.round(24 * scale));
 
   ctx.lineWidth = Math.round(2 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(15 * scale), Math.round(42 * scale));
-  ctx.lineTo(width - Math.round(15 * scale), Math.round(42 * scale));
+  ctx.moveTo(Math.round(12 * scale), Math.round(32 * scale));
+  ctx.lineTo(width - Math.round(12 * scale), Math.round(32 * scale));
   ctx.stroke();
 
-  ctx.font = `bold ${Math.round(15 * scale)}px sans-serif`;
-  ctx.fillText(`${meta?.model || 'NIIMBOT B1 PRO'} CONNECTED! ✓`, width / 2, Math.round(75 * scale));
+  // Big central paw
+  drawPawPrint(ctx, width / 2, Math.round(75 * scale), Math.round(35 * scale));
 
-  ctx.font = `${Math.round(13 * scale)}px sans-serif`;
-  ctx.fillText('Bluetooth printing is READY', width / 2, Math.round(105 * scale));
+  ctx.font = `bold ${Math.round(14 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(`${meta?.model || 'NIIMBOT B1 PRO'} CONNECTED ✓`, width / 2, Math.round(122 * scale));
 
-  ctx.font = `${Math.round(11 * scale)}px sans-serif`;
-  ctx.fillText('Auto-prints when comments are pinned!', width / 2, Math.round(135 * scale));
+  ctx.font = `normal ${Math.round(12 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('Bluetooth printing is READY!', width / 2, Math.round(144 * scale));
+
+  ctx.font = `normal ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('Auto-prints when comments are pinned!', width / 2, Math.round(163 * scale));
 
   ctx.lineWidth = Math.round(1 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(25 * scale), Math.round(155 * scale));
-  ctx.lineTo(width - Math.round(25 * scale), Math.round(155 * scale));
+  ctx.moveTo(Math.round(20 * scale), Math.round(174 * scale));
+  ctx.lineTo(width - Math.round(20 * scale), Math.round(174 * scale));
   ctx.stroke();
 
-  ctx.font = `${Math.round(11 * scale)}px sans-serif`;
   const now = new Date().toLocaleString('en-PH');
-  ctx.fillText(now, width / 2, Math.round(180 * scale));
+  ctx.font = `normal ${Math.round(10 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(now, width / 2, Math.round(193 * scale));
 
   const encodedImage = ImageEncoder.encodeCanvas(
     canvas,
@@ -361,7 +476,7 @@ export async function testPrintNiimbot(client) {
   const taskType = client.getPrintTaskType() || 'B1';
   const printTask = client.protocol.newPrintTask(taskType, {
     totalPages: 1,
-    density: meta?.densityDefault || 3,
+    density: 5,
     labelType: LabelType.WithGaps
   });
 
