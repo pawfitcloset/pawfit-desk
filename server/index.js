@@ -107,9 +107,12 @@ function loadOAuth2Client() {
       return false;
     }
 
-    const redirectUri = process.env.RENDER_EXTERNAL_URL
-      ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')}/oauth2callback`
-      : (process.env.GOOGLE_REDIRECT_URI || REDIRECT_URI);
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI ||
+      (process.env.RENDER_EXTERNAL_URL
+        ? `${process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '')}/oauth2callback`
+        : REDIRECT_URI);
+
+    console.log('[Google Sheets] Using OAuth Redirect URI:', redirectUri);
 
     oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 

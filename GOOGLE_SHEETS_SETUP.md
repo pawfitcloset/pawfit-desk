@@ -23,11 +23,17 @@ You can also click **"Sync to Sheet"** at any time to update all rows with the l
 6. Go to **APIs & Services → Credentials → Create Credentials → OAuth Client ID**
    - Application type: **Web application**
    - Name: `Pawfit Desk`
-   - Under **Authorized redirect URIs**, add: `http://localhost:3001/oauth2callback`
-   - Click **Create**
+   - Under **Authorized redirect URIs**, add both your local and deployed URLs:
+     - Local: `http://localhost:3001/oauth2callback`
+     - Deployed (Render / production): `https://<your-render-app-name>.onrender.com/oauth2callback`
+   - Click **Create** (or **Save** if editing an existing Client ID)
 7. Click **Download JSON** on the created credential
 8. Rename the downloaded file to **`google-credentials.json`**
 9. Place it in your project root: `c:\Users\Admin\tiktok-dashboard\google-credentials.json`
+   > **Note for Render Deployment**: If deploying to Render, set these Environment Variables in your Render Dashboard:
+   > - `GOOGLE_CLIENT_ID` (from your Google Cloud credential)
+   > - `GOOGLE_CLIENT_SECRET` (from your Google Cloud credential)
+   > - `GOOGLE_REDIRECT_URI`: `https://<your-render-app-name>.onrender.com/oauth2callback`
 
 ---
 
