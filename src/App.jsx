@@ -91,6 +91,46 @@ export default function PawfitDesk() {
     } catch (e) {}
   }, [printSettings]);
 
+  // ── TikTok Session ID (for deployed servers) ──────────────────────────────
+  const [tiktokSessionInput, setTiktokSessionInput] = useState('');
+  const [tiktokHasSession, setTiktokHasSession]     = useState(false);
+  const [savingSession, setSavingSession]           = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/tiktok-session`)
+      .then(r => r.json())
+      .then(d => setTiktokHasSession(d.hasSession))
+      .catch(() => {});
+  }, []);
+
+  async function saveTiktokSession() {
+    if (!tiktokSessionInput.trim()) return;
+    setSavingSession(true);
+    try {
+      const res = await fetch(`${API_URL}/api/tiktok-session`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: tiktokSessionInput.trim() })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setTiktokHasSession(true);
+        setTiktokSessionInput('');
+        showSheetToast('success', 'TikTok Session ID saved! ✓');
+      }
+    } catch (e) {
+      showSheetToast('error', 'Failed to save session ID');
+    } finally {
+      setSavingSession(false);
+    }
+  }
+
+  async function clearTiktokSession() {
+    await fetch(`${API_URL}/api/tiktok-session`, { method: 'DELETE' }).catch(() => {});
+    setTiktokHasSession(false);
+    showSheetToast('info', 'TikTok Session ID cleared.');
+  }
+
   // Fetch server-synced print settings on mount
   useEffect(() => {
     fetch(`${API_URL}/api/settings`)
@@ -1536,6 +1576,60 @@ export default function PawfitDesk() {
                   </button>
                 </div>
               )}
+
+              {/* ── TikTok Session ID ─────────────────────────────── */}
+              <div className="pt-2 border-t border-white/5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <span className="text-rose-400">TK</span> TikTok Session ID
+                      {tiktokHasSession && (
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">Active ✓</span>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      Kailangan kapag deployed — para makapag-connect kahit naka-block ang server IP.
+                    </p>
+                  </div>
+                  {tiktokHasSession && (
+                    <button
+                      onClick={clearTiktokSession}
+                      className="text-[11px] text-rose-400 hover:text-rose-300 border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 rounded-lg transition-colors shrink-0"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-3 space-y-1">
+                  <p className="text-[11px] text-amber-400 font-semibold">Paano makuha ang Session ID:</p>
+                  <ol className="text-[11px] text-zinc-400 space-y-0.5 list-decimal list-inside">
+                    <li>Buksan ang <strong className="text-zinc-200">tiktok.com</strong> sa browser (logged in ang account)</li>
+                    <li>F12 → Application → Cookies → <strong className="text-zinc-200">tiktok.com</strong></li>
+                    <li>Hanapin ang <code className="text-amber-300 bg-black/40 px-1 rounded">sessionid</code> — kopyahin ang Value</li>
+                    <li>I-paste dito at i-save</li>
+                  </ol>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Paste sessionid value here..."
+                    value={tiktokSessionInput}
+                    onChange={(e) => setTiktokSessionInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && saveTiktokSession()}
+                    className="flex-1 bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 outline-none focus:border-rose-500/50 transition-colors font-mono"
+                  />
+                  <button
+                    onClick={saveTiktokSession}
+                    disabled={savingSession || !tiktokSessionInput.trim()}
+                    className="bg-rose-500/20 hover:bg-rose-500/30 disabled:opacity-40 text-rose-400 border border-rose-500/30 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors"
+                  >
+                    {savingSession ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+
             </div>
 
             {/* Modal Footer */}

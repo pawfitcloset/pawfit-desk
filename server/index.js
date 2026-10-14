@@ -232,6 +232,31 @@ app.get('/auth/google-user', (req, res) => {
   res.json({ user: googleUser || null });
 });
 
+// ─── TikTok Session Management ─────────────────────────────────────────────────
+// Allows setting TIKTOK_SESSION_ID at runtime (survives until server restart)
+// GET  /api/tiktok-session → { hasSession: bool }
+// POST /api/tiktok-session { sessionId: "..." } → { ok: true }
+
+app.get('/api/tiktok-session', (req, res) => {
+  res.json({ hasSession: !!process.env.TIKTOK_SESSION_ID });
+});
+
+app.post('/api/tiktok-session', (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId || typeof sessionId !== 'string' || !sessionId.trim()) {
+    return res.status(400).json({ error: 'sessionId is required' });
+  }
+  process.env.TIKTOK_SESSION_ID = sessionId.trim();
+  console.log('[TikTok] Session ID updated at runtime.');
+  res.json({ ok: true });
+});
+
+app.delete('/api/tiktok-session', (req, res) => {
+  delete process.env.TIKTOK_SESSION_ID;
+  console.log('[TikTok] Session ID cleared.');
+  res.json({ ok: true });
+});
+
 app.post('/auth/google-disconnect', async (req, res) => {
   try {
     if (oauth2Client && sheetsService) {
@@ -816,17 +841,63 @@ io.on('connection', (socket) => {
     }
 
     try {
+      // Build session object if TIKTOK_SESSION_ID env var is set
+      // This is required on deployed servers where TikTok blocks anonymous requests
+      const sessionId = process.env.TIKTOK_SESSION_ID;
+      const sessionOpts = sessionId
+        ? { session: { cookie: { sessionid: sessionId } } }
+        : {};
+
       tiktokLiveConnection = new TikTokLiveConnection(cleanUsername, {
         processInitialData: true,
-        enableExtendedGiftInfo: false
+        enableExtendedGiftInfo: false,
+        fetchRoomInfoOnConnect: true,
+        ...sessionOpts,
+        webClientOptions: {
+          timeout: { request: 20000 }
+        }
       });
 
+      console.log(`[TikTok] Connecting to @${cleanUsername}${sessionId ? ' (with sessionId)' : ' (anonymous)'}`);
+
       tiktokLiveConnection.connect().then(state => {
-        console.log(`Connected to roomId ${state.roomId}`);
+        console.log(`[TikTok] Connected to roomId ${state.roomId}`);
         socket.emit('tiktok-connected', `Successfully connected to @${cleanUsername}`);
       }).catch(err => {
-        console.error('Failed to connect:', err.message);
-        socket.emit('tiktok-error', `Failed to connect to @${cleanUsername}. Make sure the user is currently live.`);
+        console.error('[TikTok] Failed to connect:', err.message);
+        const errMsg = err.message || '';
+        let friendlyMsg = `Hindi makaconnect sa @${cleanUsername}.`;
+
+        if (
+          errMsg.includes('UserOfflineError') ||
+          errMsg.toLowerCase().includes('not live') ||
+          errMsg.toLowerCase().includes('offline') ||
+          errMsg.toLowerCase().includes('not currently')
+        ) {
+          friendlyMsg = `@${cleanUsername} ay hindi naka-live ngayon. Subukan ulit kapag live na sila.`;
+        } else if (errMsg.toLowerCase().includes('not found') || errMsg.toLowerCase().includes('user not found')) {
+          friendlyMsg = `@${cleanUsername} ay hindi mahanap. Siguraduhing tama ang username.`;
+        } else if (
+          errMsg.toLowerCase().includes('getaddrinfo') ||
+          errMsg.toLowerCase().includes('network') ||
+          errMsg.toLowerCase().includes('econnrefused') ||
+          errMsg.toLowerCase().includes('fetch')
+        ) {
+          friendlyMsg = `Network error sa server. Tingnan ang internet connection ng server.`;
+        } else if (
+          errMsg.includes('403') ||
+          errMsg.includes('429') ||
+          errMsg.toLowerCase().includes('blocked') ||
+          errMsg.toLowerCase().includes('rate limit') ||
+          errMsg.toLowerCase().includes('captcha') ||
+          errMsg.toLowerCase().includes('sign')
+        ) {
+          friendlyMsg = `TikTok ay nag-block ng request mula sa server IP. Kailangan ng TIKTOK_SESSION_ID sa environment variables. Error: ${errMsg}`;
+        } else {
+          friendlyMsg = `Hindi makaconnect sa @${cleanUsername}. Error: ${errMsg}`;
+        }
+
+        socket.emit('tiktok-error', friendlyMsg);
       });
 
       const handleChatData = (data) => {
