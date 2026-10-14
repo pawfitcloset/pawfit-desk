@@ -178,7 +178,17 @@ app.get('/oauth2callback', async (req, res) => {
     }
 
     io.emit('google-auth-success', { user: googleUser });
-    res.send('<html><body style="font-family:sans-serif;background:#050505;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0"><h2>✅ Google Sheets connected! You can close this tab.</h2><script>window.close();</script></body></html>');
+    res.send(`<html><body style="font-family:sans-serif;background:#050505;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:12px">
+<h2 style="margin:0">✅ Google connected!</h2>
+<p style="color:#aaa;margin:0;font-size:14px">You can close this tab.</p>
+<script>
+  // Tell the parent window auth succeeded (more reliable than socket.io across popups)
+  if (window.opener) {
+    window.opener.postMessage('google-auth-success', '*');
+  }
+  setTimeout(() => window.close(), 1200);
+</script>
+</body></html>`);
   } catch (err) {
     console.error('[Google Sheets] OAuth callback error:', err.message);
     res.send('<p>Error during authentication. Check the console.</p>');

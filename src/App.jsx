@@ -102,6 +102,26 @@ export default function PawfitDesk() {
       .catch(() => {});
   }, []);
 
+  // Listen for the OAuth popup telling us auth succeeded via postMessage
+  useEffect(() => {
+    function handleAuthMessage(event) {
+      if (event.data === 'google-auth-success') {
+        // Re-fetch live status from server so we get the user profile too
+        fetch(`${API_URL}/auth/google-status`)
+          .then(r => r.json())
+          .then(data => {
+            setGoogleConnected(data.connected);
+            if (data.user) setGoogleUser(data.user);
+            if (data.connected) fetchSheetInfo();
+            showSheetToast('success', 'Google Sheets connected! ✓');
+          })
+          .catch(() => {});
+      }
+    }
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
+  }, []);
+
   function fetchSheetInfo() {
     fetch(`${API_URL}/sheets/info`)
       .then(r => r.json())
