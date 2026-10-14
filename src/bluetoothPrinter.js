@@ -224,7 +224,7 @@ export async function printInvoiceNiimbot(client, order) {
   const printheadPixels = meta?.printheadPixels || 384;
   const scale = printheadPixels / 384;
   const width = printheadPixels;
-  const height = Math.round(200 * scale);
+  const height = Math.round(195 * scale);
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
