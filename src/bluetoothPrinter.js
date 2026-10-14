@@ -224,7 +224,7 @@ export async function printInvoiceNiimbot(client, order) {
   const printheadPixels = meta?.printheadPixels || 384;
   const scale = printheadPixels / 384;
   const width = printheadPixels;
-  const height = Math.round(215 * scale);
+  const height = Math.round(200 * scale);
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -256,39 +256,32 @@ export async function printInvoiceNiimbot(client, order) {
   const buyerLabel = 'Buyer: ';
   const buyerName = order.name || 'Anonymous';
   const fullBuyer = `${buyerLabel}${buyerName}`;
-  autoFitText(ctx, fullBuyer, 'normal', 26, scale, maxW);
-  ctx.fillText(fullBuyer, padL, Math.round(58 * scale));
+  autoFitText(ctx, fullBuyer, 'normal', 32, scale, maxW);   // bigger: 26 → 32
+  ctx.fillText(fullBuyer, padL, Math.round(62 * scale));
 
   // ── 3. Username — large, not bold ────────────────────────────────────────────
   const username = (order.username || '').replace(/^@+/, '');
   const displayUser = username ? `@${username}` : '';
   if (displayUser) {
     autoFitText(ctx, displayUser, 'normal', 18, scale, maxW - Math.round(60 * scale));
-    ctx.fillText(displayUser, padL, Math.round(82 * scale));
+    ctx.fillText(displayUser, padL, Math.round(84 * scale));
   }
 
   // ── 4. Time — small, right-aligned ───────────────────────────────────────────
   const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   ctx.textAlign = 'right';
   ctx.font = `normal ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(82 * scale));
+  ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(84 * scale));
   ctx.textAlign = 'left';
 
-  // ── Dashed divider ───────────────────────────────────────────────────────────
-  ctx.lineWidth = Math.round(1 * scale);
-  ctx.setLineDash([Math.round(4 * scale), Math.round(3 * scale)]);
-  ctx.beginPath();
-  ctx.moveTo(Math.round(8 * scale), Math.round(96 * scale));
-  ctx.lineTo(width - Math.round(8 * scale), Math.round(96 * scale));
-  ctx.stroke();
-  ctx.setLineDash([]);
+  // (dashed divider removed)
 
   // ── 5. Rounded box for CODE & PRICE (compact, no inner divider) ──────────────
   ctx.lineWidth = Math.round(2 * scale);
   const boxX = Math.round(8 * scale);
-  const boxY = Math.round(104 * scale);
+  const boxY = Math.round(95 * scale);   // moved up, closer to username
   const boxW = width - Math.round(16 * scale);
-  const boxH = Math.round(72 * scale);   // smaller box
+  const boxH = Math.round(72 * scale);
   const r = Math.round(6 * scale);
 
   ctx.beginPath();
@@ -310,19 +303,21 @@ export async function printInvoiceNiimbot(client, order) {
   autoFitText(ctx, String(order.code), 'bold', 22, scale, boxW - Math.round(80 * scale));
   ctx.fillText(String(order.code), Math.round(84 * scale), boxY + Math.round(22 * scale));
 
-  // PRICE row (no divider line between)
+  // PRICE row
   ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText('PRICE', Math.round(22 * scale), boxY + Math.round(54 * scale));
   ctx.font = `bold ${Math.round(22 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(54 * scale));
 
-  // ── 6. Footer ────────────────────────────────────────────────────────────────
-  const footerY = Math.round(205 * scale);
+  // ── 6. Footer — right below the box ──────────────────────────────────────────
+  // boxY + boxH = 95 + 72 = 167
+  const footerLineY = Math.round((95 + 72 + 10) * scale);  // 177
+  const footerY     = Math.round((95 + 72 + 22) * scale);  // 189
 
   ctx.lineWidth = Math.round(1.5 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(8 * scale), Math.round(195 * scale));
-  ctx.lineTo(width - Math.round(8 * scale), Math.round(195 * scale));
+  ctx.moveTo(Math.round(8 * scale), footerLineY);
+  ctx.lineTo(width - Math.round(8 * scale), footerLineY);
   ctx.stroke();
 
   ctx.textAlign = 'center';
