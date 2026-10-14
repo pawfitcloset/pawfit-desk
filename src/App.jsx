@@ -431,7 +431,7 @@ export default function PawfitDesk() {
 
     // 1. Direct Bluetooth auto-print on phone if connected!
     if (btPrinterRef.current) {
-      printInvoice(btPrinterRef.current, newOrder).then(() => {
+      printInvoice(btPrinterRef.current, newOrder, printSettingsRef.current).then(() => {
         showSheetToast('success', `Sticker Printed: ${newOrder.name} (${newOrder.code}) ✓`);
       }).catch(err => {
         console.warn('Bluetooth print error:', err.message);
