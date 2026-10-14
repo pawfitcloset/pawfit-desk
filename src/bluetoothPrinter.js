@@ -224,7 +224,7 @@ export async function printInvoiceNiimbot(client, order) {
   const printheadPixels = meta?.printheadPixels || 384;
   const scale = printheadPixels / 384;
   const width = printheadPixels;
-  const height = Math.round(250 * scale);
+  const height = Math.round(300 * scale);
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -264,22 +264,22 @@ export async function printInvoiceNiimbot(client, order) {
   const displayUser = username ? `@${username}` : '';
   if (displayUser) {
     autoFitText(ctx, displayUser, 'normal', 18, scale, maxW - Math.round(60 * scale));
-    ctx.fillText(displayUser, padL, Math.round(85 * scale));
+    ctx.fillText(displayUser, padL, Math.round(100 * scale));
   }
 
   // ── 4. Time — right-aligned same line as username ─────────────────────────────
   const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   ctx.textAlign = 'right';
   ctx.font = `normal ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(85 * scale));
+  ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(100 * scale));
   ctx.textAlign = 'left';
 
   // ── 5. Rounded box for CODE & PRICE ──────────────────────────────────────────
   ctx.lineWidth = Math.round(2 * scale);
   const boxX = Math.round(8 * scale);
-  const boxY = Math.round(100 * scale);
+  const boxY = Math.round(115 * scale);
   const boxW = width - Math.round(16 * scale);
-  const boxH = Math.round(70 * scale);  // box bottom = 170
+  const boxH = Math.round(70 * scale);  // box bottom = 185
   const r = Math.round(6 * scale);
 
   ctx.beginPath();
@@ -308,8 +308,8 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(54 * scale));
 
   // ── 6. Footer ────────────────────────────────────────────────────────────────
-  const footerLineY = Math.round(180 * scale);
-  const footerY     = Math.round(190 * scale);
+  const footerLineY = Math.round(200 * scale);
+  const footerY     = Math.round(215 * scale);
 
   ctx.lineWidth = Math.round(1.5 * scale);
   ctx.beginPath();
