@@ -1,35 +1,83 @@
 // Bluetooth Thermal Printer Helper for Mobile (Web Bluetooth API)
-// Compatible with Liotog, Fun Print, Xprinter, and generic ESC/POS / BLE thermal printers.
+// Full native support for NIIMBOT printers (B1, B1 Pro, B21, D110, etc.) via @mmote/niimbluelib
+// AND generic ESC/POS / BLE thermal printers (Liotog, Fun Print, Xprinter BLE).
+
+import {
+  NiimbotBluetoothClient,
+  ImageEncoder,
+  PageColorType,
+  LabelType
+} from '@mmote/niimbluelib';
 
 const COMMON_SERVICES = [
-  '0000fee7-0000-1000-8000-00805f9b34fb', // Very common for Fun Print / C9 / WalkPrint / GB01
+  'e7810a71-73ae-499d-8c15-faa9aef0c3f2', // Niimbot Primary Service
+  '0000fee7-0000-1000-8000-00805f9b34fb', // Fun Print / C9 / WalkPrint / GB01 / Liotog
   '0000ffe0-0000-1000-8000-00805f9b34fb', // Standard HM-10 / Nordic serial BLE
   '000018f0-0000-1000-8000-00805f9b34fb', // Standard POS thermal printer
-  '49535343-fe7d-4ae5-8fa9-9fafd205e455', // ISSC transparent UART
-  'e7810a71-73ae-499d-8c15-faa9aef0c3f2'  // Broadcom / Jerry BLE
+  '49535343-fe7d-4ae5-8fa9-9fafd205e455'  // ISSC transparent UART
 ];
 
 /**
  * Request and connect to nearby Bluetooth Thermal Printer
+ * Supports both NIIMBOT (B1, B1 Pro, B21, etc.) and generic ESC/POS BLE printers.
  */
-export async function connectBluetoothPrinter() {
+export async function connectBluetoothPrinter(onDisconnect) {
   if (!navigator.bluetooth) {
-    throw new Error('Web Bluetooth is not supported on this browser. On Android, please use Chrome. On iPhone, use the WebBLE browser app.');
+    throw new Error(
+      'Web Bluetooth is not supported on this browser.\n' +
+      '• On Android: Open Chrome and ensure you use HTTPS (e.g. https://...).\n' +
+      '• On iPhone: Use the WebBLE or Bluefy browser app.'
+    );
   }
 
-  // Request device
+  // Request device dialog
   const device = await navigator.bluetooth.requestDevice({
     acceptAllDevices: true,
     optionalServices: COMMON_SERVICES
   });
 
+  if (!device) {
+    throw new Error('No device selected.');
+  }
+
+  const deviceName = device.name || 'Bluetooth Printer';
+  const isNiimbot = /niimbot|b1|b21|b3s|d11|d110|b203|jc/i.test(deviceName);
+
+  // ─── 1. Attempt NIIMBOT connection first if name matches or fallback ───
+  if (isNiimbot) {
+    try {
+      console.log(`[Bluetooth] Attempting Niimbot connection to "${deviceName}"...`);
+      const client = new NiimbotBluetoothClient();
+      await client.connect({ authorizedDevice: device });
+
+      client.on('disconnect', () => {
+        console.warn('[Bluetooth] Niimbot printer disconnected.');
+        if (onDisconnect) onDisconnect();
+      });
+
+      const meta = client.getModelMetadata();
+      console.log('[Bluetooth] Niimbot connected successfully:', meta);
+
+      return {
+        type: 'niimbot',
+        client,
+        device,
+        name: deviceName,
+        model: meta?.model || 'NIIMBOT B1 Pro',
+        meta
+      };
+    } catch (niimErr) {
+      console.warn('[Bluetooth] Niimbot protocol connect failed, falling back to ESC/POS:', niimErr.message);
+    }
+  }
+
+  // ─── 2. Connect via Standard ESC/POS GATT ──────────────────────────────
   if (!device.gatt) {
     throw new Error('Bluetooth GATT not available on this device.');
   }
 
   const server = await device.gatt.connect();
 
-  // Dynamically find the primary service and writable characteristic
   let writeCharacteristic = null;
   const services = await server.getPrimaryServices();
 
@@ -49,28 +97,263 @@ export async function connectBluetoothPrinter() {
   }
 
   if (!writeCharacteristic) {
-    throw new Error('Could not find a writable print channel on this Bluetooth device.');
+    // If not found in standard services, try Niimbot protocol as last resort
+    try {
+      const client = new NiimbotBluetoothClient();
+      await client.connect({ authorizedDevice: device });
+      const meta = client.getModelMetadata();
+      return {
+        type: 'niimbot',
+        client,
+        device,
+        name: deviceName,
+        model: meta?.model || 'NIIMBOT B1 Pro',
+        meta
+      };
+    } catch {
+      throw new Error('Could not find a writable print channel on this Bluetooth device.');
+    }
   }
 
+  device.addEventListener('gattserverdisconnected', () => {
+    console.warn('[Bluetooth] ESC/POS printer disconnected.');
+    if (onDisconnect) onDisconnect();
+  });
+
   return {
+    type: 'escpos',
     device,
     characteristic: writeCharacteristic,
-    name: device.name || 'Bluetooth Printer'
+    name: deviceName,
+    model: 'ESC/POS Printer'
   };
 }
 
 /**
  * Disconnects from the Bluetooth printer
  */
-export function disconnectBluetoothPrinter(device) {
-  if (device && device.gatt && device.gatt.connected) {
-    device.gatt.disconnect();
+export async function disconnectBluetoothPrinter(printer) {
+  if (!printer) return;
+  try {
+    if (printer.type === 'niimbot' && printer.client) {
+      await printer.client.disconnect();
+    } else if (printer.device?.gatt?.connected) {
+      printer.device.gatt.disconnect();
+    }
+  } catch (err) {
+    console.warn('[Bluetooth] Error disconnecting:', err.message);
   }
 }
 
 /**
- * Helper to split byte buffer into safe BLE MTU chunks (<= 60 bytes)
+ * Unified Print Invoice Function
+ * Automatically routes to Niimbot protocol or ESC/POS based on printer type.
  */
+export async function printInvoice(printer, order) {
+  if (!printer) throw new Error('Bluetooth printer is not connected.');
+
+  if (printer.type === 'niimbot') {
+    return printInvoiceNiimbot(printer.client, order);
+  } else if (printer.type === 'escpos') {
+    return printInvoiceEscPos(printer.characteristic, order);
+  } else if (printer.characteristic) {
+    // Backward compatibility if raw characteristic passed
+    return printInvoiceEscPos(printer.characteristic, order);
+  } else {
+    throw new Error('Unknown printer type.');
+  }
+}
+
+/**
+ * Unified Test Print Function
+ */
+export async function printTest(printer) {
+  if (!printer) throw new Error('Bluetooth printer is not connected.');
+
+  if (printer.type === 'niimbot') {
+    return testPrintNiimbot(printer.client);
+  } else if (printer.type === 'escpos') {
+    return testPrintEscPos(printer.characteristic);
+  } else if (printer.characteristic) {
+    return testPrintEscPos(printer.characteristic);
+  } else {
+    throw new Error('Unknown printer type.');
+  }
+}
+
+// ─── NIIMBOT Specific Printing ────────────────────────────────────────────────
+
+/**
+ * Prints a high-resolution label sticker on NIIMBOT B1 / B1 Pro / B21 / D110
+ */
+export async function printInvoiceNiimbot(client, order) {
+  if (!client || !client.isConnected()) {
+    throw new Error('NIIMBOT printer is not connected.');
+  }
+
+  const meta = client.getModelMetadata();
+  const printheadPixels = meta?.printheadPixels || 384;
+  const scale = printheadPixels / 384;
+  const width = printheadPixels;
+  const height = Math.round(240 * scale); // 30mm standard label height
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  // Background must be pure white
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = '#000000';
+  ctx.strokeStyle = '#000000';
+
+  // 1. Header: PAWFIT CLOSET
+  ctx.textAlign = 'center';
+  ctx.font = `bold ${Math.round(20 * scale)}px sans-serif`;
+  ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(24 * scale));
+
+  // 2. Divider line
+  ctx.lineWidth = Math.round(2 * scale);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(12 * scale), Math.round(32 * scale));
+  ctx.lineTo(width - Math.round(12 * scale), Math.round(32 * scale));
+  ctx.stroke();
+
+  // 3. Buyer & Time
+  ctx.textAlign = 'left';
+  ctx.font = `bold ${Math.round(15 * scale)}px sans-serif`;
+  const buyerName = order.name || 'Anonymous';
+  ctx.fillText(`Buyer: ${buyerName.slice(0, 24)}`, Math.round(16 * scale), Math.round(54 * scale));
+
+  ctx.font = `${Math.round(13 * scale)}px sans-serif`;
+  const buyerUser = order.username ? `${order.username}  ` : '';
+  const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  ctx.fillText(`${buyerUser}• ${orderTime}`, Math.round(16 * scale), Math.round(74 * scale));
+
+  // 4. Highlight Box for ITEM CODE & PRICE
+  ctx.lineWidth = Math.round(2 * scale);
+  const boxTop = Math.round(86 * scale);
+  const boxHeight = Math.round(92 * scale);
+  ctx.strokeRect(Math.round(14 * scale), boxTop, width - Math.round(28 * scale), boxHeight);
+
+  // Large Item Code
+  ctx.font = `bold ${Math.round(28 * scale)}px sans-serif`;
+  ctx.fillText(`ITEM: ${order.code}`, Math.round(24 * scale), boxTop + Math.round(38 * scale));
+
+  // Large Price
+  ctx.font = `bold ${Math.round(24 * scale)}px sans-serif`;
+  ctx.fillText(`PRICE: P${order.amount}`, Math.round(24 * scale), boxTop + Math.round(74 * scale));
+
+  // 5. Footer
+  ctx.textAlign = 'center';
+  ctx.font = `${Math.round(11 * scale)}px sans-serif`;
+  ctx.fillText('Thank you for shopping! • TikTok Live', width / 2, Math.round(214 * scale));
+
+  // Encode canvas into Niimbot raster packet protocol
+  const encodedImage = ImageEncoder.encodeCanvas(
+    canvas,
+    PageColorType.SingleColor,
+    meta?.printDirection || 'top'
+  );
+
+  const taskType = client.getPrintTaskType() || 'B1';
+  const printTask = client.protocol.newPrintTask(taskType, {
+    totalPages: 1,
+    density: meta?.densityDefault || 3,
+    labelType: LabelType.WithGaps
+  });
+
+  try {
+    await printTask.printInit();
+    await printTask.printPage(encodedImage, 1);
+    await printTask.waitForPageFinished();
+    await printTask.waitForFinished();
+  } finally {
+    await printTask.printEnd();
+  }
+}
+
+/**
+ * Print a quick test label on NIIMBOT B1 / B1 Pro
+ */
+export async function testPrintNiimbot(client) {
+  if (!client || !client.isConnected()) {
+    throw new Error('NIIMBOT printer is not connected.');
+  }
+
+  const meta = client.getModelMetadata();
+  const printheadPixels = meta?.printheadPixels || 384;
+  const scale = printheadPixels / 384;
+  const width = printheadPixels;
+  const height = Math.round(220 * scale);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = '#000000';
+  ctx.strokeStyle = '#000000';
+
+  ctx.textAlign = 'center';
+  ctx.font = `bold ${Math.round(22 * scale)}px sans-serif`;
+  ctx.fillText('PAWFIT DESK', width / 2, Math.round(30 * scale));
+
+  ctx.lineWidth = Math.round(2 * scale);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(15 * scale), Math.round(42 * scale));
+  ctx.lineTo(width - Math.round(15 * scale), Math.round(42 * scale));
+  ctx.stroke();
+
+  ctx.font = `bold ${Math.round(15 * scale)}px sans-serif`;
+  ctx.fillText(`${meta?.model || 'NIIMBOT B1 PRO'} CONNECTED! ✓`, width / 2, Math.round(75 * scale));
+
+  ctx.font = `${Math.round(13 * scale)}px sans-serif`;
+  ctx.fillText('Bluetooth printing is READY', width / 2, Math.round(105 * scale));
+
+  ctx.font = `${Math.round(11 * scale)}px sans-serif`;
+  ctx.fillText('Auto-prints when comments are pinned!', width / 2, Math.round(135 * scale));
+
+  ctx.lineWidth = Math.round(1 * scale);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(25 * scale), Math.round(155 * scale));
+  ctx.lineTo(width - Math.round(25 * scale), Math.round(155 * scale));
+  ctx.stroke();
+
+  ctx.font = `${Math.round(11 * scale)}px sans-serif`;
+  const now = new Date().toLocaleString('en-PH');
+  ctx.fillText(now, width / 2, Math.round(180 * scale));
+
+  const encodedImage = ImageEncoder.encodeCanvas(
+    canvas,
+    PageColorType.SingleColor,
+    meta?.printDirection || 'top'
+  );
+
+  const taskType = client.getPrintTaskType() || 'B1';
+  const printTask = client.protocol.newPrintTask(taskType, {
+    totalPages: 1,
+    density: meta?.densityDefault || 3,
+    labelType: LabelType.WithGaps
+  });
+
+  try {
+    await printTask.printInit();
+    await printTask.printPage(encodedImage, 1);
+    await printTask.waitForPageFinished();
+    await printTask.waitForFinished();
+  } finally {
+    await printTask.printEnd();
+  }
+}
+
+// ─── ESC/POS Generic Thermal Printing ─────────────────────────────────────────
+
 async function sendChunks(characteristic, data) {
   const CHUNK_SIZE = 60;
   for (let i = 0; i < data.length; i += CHUNK_SIZE) {
@@ -80,38 +363,21 @@ async function sendChunks(characteristic, data) {
     } else {
       await characteristic.writeValue(chunk);
     }
-    // Short pause between chunks for printer buffer
     await new Promise(resolve => setTimeout(resolve, 25));
   }
 }
 
-/**
- * Encodes text string to ASCII / CP437 Uint8Array
- */
-function encodeText(str) {
-  const encoder = new TextEncoder();
-  return encoder.encode(str);
-}
-
-/**
- * Builds standard ESC/POS commands for order sticker
- */
-export async function printInvoiceBluetooth(characteristic, order) {
+export async function printInvoiceEscPos(characteristic, order) {
   if (!characteristic) throw new Error('Bluetooth printer is not connected.');
 
   const encoder = new TextEncoder();
   const ESC = 0x1B;
   const GS = 0x1D;
 
-  // ESC/POS Command Sequence:
-  // 1. Initialize: ESC @ [0x1B, 0x40]
-  // 2. Center Align: ESC a 1 [0x1B, 0x61, 0x01]
-  // 3. Double-height header: GS ! 0x11 [0x1D, 0x21, 0x11]
   const initCmds = new Uint8Array([ESC, 0x40, ESC, 0x61, 0x01]);
   const header = encoder.encode("PAWFIT DESK\nINVOICE\n");
   const divider = encoder.encode("--------------------------------\n");
 
-  // Left align for details
   const leftAlign = new Uint8Array([ESC, 0x61, 0x00]);
   const details = encoder.encode(
     `Buyer: ${order.name || 'Anonymous'}\n` +
@@ -119,21 +385,16 @@ export async function printInvoiceBluetooth(characteristic, order) {
     `Time:  ${order.time || ''}\n`
   );
 
-  // Bold on: ESC E 1 [0x1B, 0x45, 0x01]
-  // Large item code & amount: GS ! 0x11
   const boldOn = new Uint8Array([ESC, 0x45, 0x01, GS, 0x21, 0x11]);
   const itemInfo = encoder.encode(
     `ITEM:  ${order.code}\n` +
     `PRICE: P${order.amount}\n`
   );
-  // Bold off: ESC E 0, normal size: GS ! 0x00
   const boldOff = new Uint8Array([ESC, 0x45, 0x00, GS, 0x21, 0x00]);
 
   const footer = encoder.encode("--------------------------------\nThank you for shopping!\n");
-  // Feed 4 lines: ESC d 4
   const feedCmd = new Uint8Array([ESC, 0x64, 0x04]);
 
-  // Combine all parts
   const fullPayload = concatenateUint8Arrays([
     initCmds,
     header,
@@ -150,10 +411,7 @@ export async function printInvoiceBluetooth(characteristic, order) {
   await sendChunks(characteristic, fullPayload);
 }
 
-/**
- * Print a quick test receipt
- */
-export async function testPrintBluetooth(characteristic) {
+export async function testPrintEscPos(characteristic) {
   if (!characteristic) throw new Error('Bluetooth printer is not connected.');
 
   const encoder = new TextEncoder();
@@ -177,3 +435,7 @@ function concatenateUint8Arrays(arrays) {
   }
   return result;
 }
+
+// Aliases for backwards compatibility
+export const printInvoiceBluetooth = printInvoice;
+export const testPrintBluetooth = printTest;

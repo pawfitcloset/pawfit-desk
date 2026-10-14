@@ -22,14 +22,15 @@ import {
   ShoppingBag,
   Bluetooth,
   X,
-  Link2
+  Link2,
+  HelpCircle
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { 
   connectBluetoothPrinter, 
   disconnectBluetoothPrinter, 
-  printInvoiceBluetooth, 
-  testPrintBluetooth 
+  printInvoice, 
+  printTest 
 } from './bluetoothPrinter';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
@@ -115,13 +116,24 @@ export default function PawfitDesk() {
   // ── Bluetooth Printer State (Mobile Direct Print) ───────────────────────────
   const [btPrinter, setBtPrinter] = useState(null);
   const [btConnecting, setBtConnecting] = useState(false);
+  const [showBtHelpModal, setShowBtHelpModal] = useState(false);
+  const btPrinterRef = useRef(null);
+
+  useEffect(() => {
+    btPrinterRef.current = btPrinter;
+  }, [btPrinter]);
 
   async function handleConnectBluetooth() {
     setBtConnecting(true);
     try {
-      const printer = await connectBluetoothPrinter();
+      const printer = await connectBluetoothPrinter(() => {
+        setBtPrinter(null);
+        btPrinterRef.current = null;
+        showSheetToast('info', 'Bluetooth printer disconnected.');
+      });
       setBtPrinter(printer);
-      showSheetToast('success', `Printer Connected: ${printer.name} ✓`);
+      btPrinterRef.current = printer;
+      showSheetToast('success', `Printer Connected: ${printer.name || 'NIIMBOT B1 Pro'} ✓`);
     } catch (err) {
       if (err.name !== 'NotFoundError') {
         alert(`Bluetooth Error: ${err.message}`);
@@ -131,19 +143,21 @@ export default function PawfitDesk() {
     }
   }
 
-  function handleDisconnectBluetooth() {
-    if (btPrinter) {
-      disconnectBluetoothPrinter(btPrinter.device);
+  async function handleDisconnectBluetooth() {
+    if (btPrinterRef.current) {
+      await disconnectBluetoothPrinter(btPrinterRef.current);
       setBtPrinter(null);
+      btPrinterRef.current = null;
       showSheetToast('info', 'Bluetooth printer disconnected.');
     }
   }
 
   async function handleTestPrintBluetooth() {
-    if (!btPrinter || !btPrinter.characteristic) return;
+    if (!btPrinterRef.current) return;
     try {
-      await testPrintBluetooth(btPrinter.characteristic);
-      showSheetToast('success', 'Test print sent! ✓');
+      showSheetToast('info', 'Printing test label...');
+      await printTest(btPrinterRef.current);
+      showSheetToast('success', 'Test print sent successfully! ✓');
     } catch (err) {
       alert(`Test print error: ${err.message}`);
     }
@@ -252,7 +266,7 @@ export default function PawfitDesk() {
       handleNewComment(commentData);
     });
 
-    socket.on('tiktok-pinned-order', (order) => {
+    socket.on('tiktok-pinned-order', async (order) => {
       setOrders(prev => [...prev, order]);
       setLockedCodes(prev => [...prev, order.code]);
       setComments(prev =>
@@ -265,6 +279,17 @@ export default function PawfitDesk() {
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       setPrintToast({ ...order });
       toastTimeoutRef.current = setTimeout(() => setPrintToast(null), 3500);
+
+      // Auto-print on phone if Bluetooth printer is connected!
+      if (btPrinterRef.current) {
+        try {
+          await printInvoice(btPrinterRef.current, order);
+          showSheetToast('success', `Sticker Printed: ${order.name} (${order.code}) ✓`);
+        } catch (err) {
+          console.warn('Bluetooth auto-print error:', err.message);
+          showSheetToast('error', `BT Print: ${err.message}`);
+        }
+      }
     });
 
     // Google auth success from backend (popup callback)
@@ -294,11 +319,12 @@ export default function PawfitDesk() {
   };
 
   const pinComment = (comment) => {
-    const orderRegex = /([a-zA-Z0-9]+)\s+(\d+)/;
+    // Robust parsing supporting: "mine 23 150", "#23 150", "23 150", "DRESS1 599"
+    const orderRegex = /(?:mine|grab|take|get|pouch)?\s*#?([a-zA-Z0-9_-]+)\s+[₱pP]?\s*(\d+)/i;
     const match = comment.text.match(orderRegex);
 
     if (!match) {
-      alert(`No item code and price found in:\n"${comment.text}"\n\nExpected format: code price  (e.g. "23 129")`);
+      alert(`No item code and price found in:\n"${comment.text}"\n\nExpected format: code price  (e.g. "23 129" or "mine 23 129")`);
       return;
     }
 
@@ -326,8 +352,10 @@ export default function PawfitDesk() {
     toastTimeoutRef.current = setTimeout(() => setPrintToast(null), 3500);
 
     // 1. Direct Bluetooth auto-print on phone if connected!
-    if (btPrinter && btPrinter.characteristic) {
-      printInvoiceBluetooth(btPrinter.characteristic, newOrder).catch(err => {
+    if (btPrinterRef.current) {
+      printInvoice(btPrinterRef.current, newOrder).then(() => {
+        showSheetToast('success', `Sticker Printed: ${newOrder.name} (${newOrder.code}) ✓`);
+      }).catch(err => {
         console.warn('Bluetooth print error:', err.message);
         showSheetToast('error', `BT Print: ${err.message}`);
       });
@@ -473,21 +501,29 @@ export default function PawfitDesk() {
                     ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 shadow-[0_0_10px_rgba(59,130,246,0.15)]'
                     : 'bg-black/60 text-zinc-400 border-white/10 hover:text-white'
                 }`}
-                title={btPrinter ? `Connected to ${btPrinter.name}. Tap to disconnect.` : 'Connect Liotog Bluetooth Printer'}
+                title={btPrinter ? `Connected to ${btPrinter.name}. Tap to disconnect.` : 'Connect NIIMBOT / Bluetooth Printer'}
               >
                 <Bluetooth size={13} className={btPrinter ? 'text-blue-400 animate-pulse' : 'text-zinc-500'} />
-                <span>{btPrinter ? 'Liotog ✓' : (btConnecting ? 'Pairing...' : 'Liotog BT')}</span>
+                <span>{btPrinter ? `${(btPrinter.name || 'Niimbot').slice(0, 10)} ✓` : (btConnecting ? 'Pairing...' : 'Niimbot BT')}</span>
               </button>
 
               {btPrinter && (
                 <button
                   onClick={handleTestPrintBluetooth}
                   className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-lg text-xs"
-                  title="Test Print"
+                  title="Test Print Label"
                 >
                   <Printer size={12} />
                 </button>
               )}
+
+              <button
+                onClick={() => setShowBtHelpModal(true)}
+                className="bg-black/60 text-zinc-400 hover:text-blue-400 border border-white/10 p-1.5 rounded-lg text-xs transition-colors"
+                title="Bluetooth & Niimbot Setup Guide"
+              >
+                <HelpCircle size={13} />
+              </button>
 
               <button
                 onClick={() => setShowSheetsModal(true)}
@@ -531,9 +567,16 @@ export default function PawfitDesk() {
                   disabled={btConnecting}
                   className="text-[11px] text-zinc-400 hover:text-white font-medium transition-colors"
                 >
-                  {btConnecting ? 'Pairing...' : 'Liotog BT'}
+                  {btConnecting ? 'Pairing...' : 'Niimbot / BT'}
                 </button>
               )}
+              <button
+                onClick={() => setShowBtHelpModal(true)}
+                title="Niimbot Setup Guide"
+                className="text-zinc-500 hover:text-blue-400 transition-colors ml-0.5"
+              >
+                <HelpCircle size={12} />
+              </button>
             </div>
 
             {/* Desktop Google Sheets Widget */}
@@ -1005,6 +1048,77 @@ export default function PawfitDesk() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NIIMBOT / Bluetooth Quick Guide Modal */}
+      {showBtHelpModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-[#18181b] border border-white/10 rounded-2xl p-6 max-w-md w-full shadow-2xl relative text-left">
+            <button
+              onClick={() => setShowBtHelpModal(false)}
+              className="absolute top-4 right-4 text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-white/5"
+            >
+              <X size={18} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                <Bluetooth size={22} />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">NIIMBOT B1 Pro Setup</h3>
+                <p className="text-xs text-zinc-400">Bluetooth connection guide for Android & iPhone</p>
+              </div>
+            </div>
+
+            <div className="space-y-3 text-xs text-zinc-300">
+              <div className="flex gap-2.5 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 font-bold flex items-center justify-center text-[10px]">1</span>
+                <div>
+                  <strong className="text-white block mb-0.5">Turn On Niimbot Printer</strong>
+                  Hold the power button on your <strong>NIIMBOT B1 Pro</strong> until the green light stays on. Make sure label roll is loaded.
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 font-bold flex items-center justify-center text-[10px]">2</span>
+                <div>
+                  <strong className="text-white block mb-0.5">Use Chrome via HTTPS</strong>
+                  Make sure you open Pawfit Desk in <strong>Google Chrome</strong> on Android using <strong>https://</strong> (Web Bluetooth requires HTTPS).
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 font-bold flex items-center justify-center text-[10px]">3</span>
+                <div>
+                  <strong className="text-white block mb-0.5">Tap "Niimbot / BT" to Connect</strong>
+                  Even if paired in Android Settings, tap the blue <strong>Niimbot BT</strong> button in this dashboard, select <strong>NIIMBOT B1 Pro</strong> from Chrome's device list, and tap <strong>Pair</strong>.
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 items-start p-2.5 rounded-xl bg-white/5 border border-white/5">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-500/20 text-blue-400 font-bold flex items-center justify-center text-[10px]">4</span>
+                <div>
+                  <strong className="text-white block mb-0.5">Auto-Print on Pinned Comments</strong>
+                  Once connected, test print using the printer icon. When you pin any comment during TikTok Live (e.g. <em>"23 129"</em> or <em>"mine 23 129"</em>), the invoice sticker will print automatically!
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 flex gap-2">
+              <button
+                onClick={() => {
+                  setShowBtHelpModal(false);
+                  handleConnectBluetooth();
+                }}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 shadow-lg shadow-blue-600/30"
+              >
+                <Bluetooth size={14} />
+                Connect NIIMBOT Now
+              </button>
             </div>
           </div>
         </div>

@@ -686,19 +686,25 @@ io.on('connection', (socket) => {
 
       // Fires when comment is pinned on TikTok Live
       tiktokLiveConnection.on(WebcastEvent.ROOM_PIN, (data) => {
-        console.log('=== ROOM_PIN EVENT RECEIVED ===');
-        const chat = data.chatMessage || data.comment || data.message || data.pinnedMessage || null;
-        if (!chat) return;
+        console.log('=== ROOM_PIN EVENT RECEIVED ===', JSON.stringify(data));
+        const chat = data.chatMessage || data.comment || data.message || data.pinnedMessage || data.pinMsg || data || {};
 
         const uniqueId = chat.uniqueId || chat.user?.uniqueId || chat.user?.displayId || data.uniqueId || data.user?.uniqueId || '';
         const nickname = chat.nickname || chat.user?.nickname || chat.name || data.nickname || data.user?.nickname || uniqueId || 'Anonymous';
-        const text = chat.content || chat.comment || chat.text || chat.message || data.content || data.comment || data.text || '';
+        const text = chat.content || chat.comment || chat.text || chat.message || chat.displayContent || data.content || data.comment || data.text || '';
 
-        if (!text) return;
+        if (!text) {
+          console.log('[ROOM_PIN] No text found in pinned event payload.');
+          return;
+        }
 
-        const orderRegex = /([a-zA-Z0-9]+)\s+(\d+)/;
+        // Match format: "23 129", "mine 23 129", "mine #23 129", "DRESS1 599"
+        const orderRegex = /(?:mine|grab|take|get|pouch)?\s*#?([a-zA-Z0-9_-]+)\s+[₱pP]?\s*(\d+)/i;
         const match = text.match(orderRegex);
-        if (!match) return;
+        if (!match) {
+          console.log(`[ROOM_PIN] Pinned comment "${text}" does not match item code and price format.`);
+          return;
+        }
 
         const code = match[1].toUpperCase();
         const price = parseInt(match[2], 10);
@@ -711,6 +717,8 @@ io.on('connection', (socket) => {
           amount: price,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         };
+
+        console.log(`[ROOM_PIN] Order parsed successfully: ${order.name} (${order.code} - ₱${order.amount})`);
 
         try {
           db.prepare(`
