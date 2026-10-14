@@ -254,179 +254,122 @@ function saveSpreadsheetId(id) {
   fs.writeFileSync(SPREADSHEET_ID_PATH, id, 'utf8');
 }
 
-// ── Daily headers for the dated worksheet ──────────────────────────────────────
-const DAILY_HEADERS = ['Buyer Name', 'Username', 'Code', 'Price (₱)', 'Time'];
+// ── Daily spreadsheet registry (dateKey -> spreadsheetId) ───────────────────
+const DAILY_REGISTRY_PATH = path.join(process.cwd(), 'daily-spreadsheets.json');
+let dailyRegistry = {};
 
-/**
- * Returns today's worksheet name: "tiktok sales-MM.DD.YY"
- * e.g. "tiktok sales-10.14.26"
- */
-function getDailySheetName() {
-  const now = new Date();
-  const mm = String(now.getMonth() + 1).padStart(2, '0');
-  const dd = String(now.getDate()).padStart(2, '0');
-  const yy = String(now.getFullYear()).slice(-2);
-  return `tiktok sales-${mm}.${dd}.${yy}`;
+try {
+  if (fs.existsSync(DAILY_REGISTRY_PATH)) {
+    dailyRegistry = JSON.parse(fs.readFileSync(DAILY_REGISTRY_PATH, 'utf8'));
+  }
+} catch (e) {
+  dailyRegistry = {};
+}
+
+function saveDailyRegistry() {
+  try {
+    fs.writeFileSync(DAILY_REGISTRY_PATH, JSON.stringify(dailyRegistry, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Failed to save daily registry:', e.message);
+  }
 }
 
 /**
- * Ensures the active spreadsheet has a worksheet for today.
- * If not, creates it and writes the header row.
- * Returns { spreadsheetId, sheetName }.
+ * Returns today's date key and spreadsheet title:
+ *   key   -> "10.14.26"
+ *   title -> "tiktok sales-10.14.26"
  */
-async function ensureDailySheet(spreadsheetId) {
-  if (!sheetsService) throw new Error('Not authenticated with Google Sheets.');
-
-  const sheetName = getDailySheetName();
-
-  // Create the spreadsheet if we don't have one yet
-  if (!spreadsheetId) {
-    const created = await sheetsService.spreadsheets.create({
-      requestBody: {
-        properties: { title: 'Pawfit Closet TikTok Sales' },
-        sheets: [{ properties: { title: sheetName } }]
-      }
-    });
-    spreadsheetId = created.data.spreadsheetId;
-    console.log(`[Sheets] Created new spreadsheet: ${spreadsheetId}`);
-
-    // Write headers on the new sheet
-    await sheetsService.spreadsheets.values.update({
-      spreadsheetId,
-      range: `'${sheetName}'!A1:E1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [DAILY_HEADERS] }
-    });
-
-    return { spreadsheetId, sheetName };
-  }
-
-  // Check if today's sheet already exists
-  let meta;
-  try {
-    meta = await sheetsService.spreadsheets.get({ spreadsheetId });
-  } catch (err) {
-    console.warn('[Sheets] Cannot access spreadsheet, creating a new one:', err.message);
-    return ensureDailySheet(null);
-  }
-
-  const existing = (meta.data.sheets || []).map(s => s.properties.title);
-
-  if (!existing.includes(sheetName)) {
-    // Add today's sheet
-    await sheetsService.spreadsheets.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        requests: [{ addSheet: { properties: { title: sheetName } } }]
-      }
-    });
-    console.log(`[Sheets] Created worksheet: "${sheetName}"`);
-
-    // Write headers
-    await sheetsService.spreadsheets.values.update({
-      spreadsheetId,
-      range: `'${sheetName}'!A1:E1`,
-      valueInputOption: 'RAW',
-      requestBody: { values: [DAILY_HEADERS] }
-    });
-  }
-
-  return { spreadsheetId, sheetName };
+function getDailyDateInfo(dateObj = new Date()) {
+  const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const dd = String(dateObj.getDate()).padStart(2, '0');
+  const yy = String(dateObj.getFullYear()).slice(-2);
+  const key = `${mm}.${dd}.${yy}`;
+  return { key, title: `tiktok sales-${key}` };
 }
 
 /**
- * Ensures the workbook has:
- *  1. 'Buyer Summary' (tab 0: aggregated pouch view per buyer + totals)
- *  2. 'Raw Orders'   (tab 1: itemized list of every pinned item)
+ * Gets or creates today's Google Spreadsheet file.
+ * Each day has its own file named "tiktok sales-MM.DD.YY"
+ * with two tabs inside: "buyer summary" and "raw orders".
+ * Returns the spreadsheetId for today.
  */
-async function ensureSheet(spreadsheetId) {
+async function ensureDailySpreadsheet(dateObj = new Date()) {
   if (!sheetsService) throw new Error('Not authenticated with Google Sheets.');
 
-  if (!spreadsheetId) {
-    const today = new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
-    const created = await sheetsService.spreadsheets.create({
-      requestBody: {
-        properties: { title: `Pawfit Desk Orders – ${today}` },
-        sheets: [
-          { properties: { title: 'Buyer Summary', index: 0 } },
-          { properties: { title: 'Raw Orders', index: 1 } }
-        ]
-      }
-    });
-    spreadsheetId = created.data.spreadsheetId;
-    console.log('[Google Sheets] Created new spreadsheet with 2 tabs:', spreadsheetId);
+  const { key, title } = getDailyDateInfo(dateObj);
 
-    // Initialize headers on both tabs
-    await sheetsService.spreadsheets.values.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        valueInputOption: 'RAW',
-        data: [
-          { range: "'Buyer Summary'!A1:I1", values: [SUMMARY_HEADERS] },
-          { range: "'Raw Orders'!A1:F1", values: [RAW_HEADERS] }
-        ]
-      }
-    });
+  // Check if we already created a spreadsheet file for this date
+  const existingId = dailyRegistry[key];
+  if (existingId) {
+    try {
+      const meta = await sheetsService.spreadsheets.get({ spreadsheetId: existingId });
+      const sheets = meta.data.sheets || [];
+      const sheetTitles = sheets.map(s => (s.properties?.title || '').toLowerCase());
 
-    return spreadsheetId;
+      const requests = [];
+      if (!sheetTitles.includes('buyer summary')) {
+        requests.push({ addSheet: { properties: { title: 'buyer summary', index: 0 } } });
+      }
+      if (!sheetTitles.includes('raw orders')) {
+        requests.push({ addSheet: { properties: { title: 'raw orders', index: 1 } } });
+      }
+      if (requests.length > 0) {
+        await sheetsService.spreadsheets.batchUpdate({
+          spreadsheetId: existingId,
+          requestBody: { requests }
+        });
+      }
+
+      activeSpreadsheetId = existingId;
+      saveSpreadsheetId(existingId);
+      return existingId;
+    } catch (err) {
+      console.warn(`[Google Sheets] Daily spreadsheet for ${key} (${existingId}) not accessible: ${err.message}. Creating fresh spreadsheet file.`);
+      delete dailyRegistry[key];
+      saveDailyRegistry();
+    }
   }
 
-  try {
-    const meta = await sheetsService.spreadsheets.get({ spreadsheetId });
-    const sheetList = meta.data.sheets || [];
-    const titles = sheetList.map(s => s.properties.title);
-    const requests = [];
-
-    // Rename legacy 'Summary' -> 'Buyer Summary' if present
-    if (titles.includes('Summary') && !titles.includes('Buyer Summary')) {
-      const sheetId = sheetList.find(s => s.properties.title === 'Summary').properties.sheetId;
-      requests.push({
-        updateSheetProperties: {
-          properties: { sheetId, title: 'Buyer Summary', index: 0 },
-          fields: 'title,index'
-        }
-      });
-    } else if (!titles.includes('Buyer Summary')) {
-      requests.push({ addSheet: { properties: { title: 'Buyer Summary', index: 0 } } });
+  // Create brand new Google Spreadsheet file named e.g. "tiktok sales-10.14.26"
+  console.log(`[Google Sheets] Generating new spreadsheet file: "${title}" for date ${key}`);
+  const created = await sheetsService.spreadsheets.create({
+    requestBody: {
+      properties: { title },
+      sheets: [
+        { properties: { title: 'buyer summary', index: 0 } },
+        { properties: { title: 'raw orders', index: 1 } }
+      ]
     }
+  });
 
-    // Rename legacy 'Orders' -> 'Raw Orders' if present
-    if (titles.includes('Orders') && !titles.includes('Raw Orders')) {
-      const sheetId = sheetList.find(s => s.properties.title === 'Orders').properties.sheetId;
-      requests.push({
-        updateSheetProperties: {
-          properties: { sheetId, title: 'Raw Orders', index: 1 },
-          fields: 'title,index'
-        }
-      });
-    } else if (!titles.includes('Raw Orders')) {
-      requests.push({ addSheet: { properties: { title: 'Raw Orders', index: 1 } } });
+  const spreadsheetId = created.data.spreadsheetId;
+  console.log(`[Google Sheets] Created new spreadsheet file "${title}" -> ID: ${spreadsheetId}`);
+
+  // Initialize header rows on both tabs
+  await sheetsService.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      valueInputOption: 'RAW',
+      data: [
+        { range: "'buyer summary'!A1:I1", values: [SUMMARY_HEADERS] },
+        { range: "'raw orders'!A1:E1", values: [['Buyer Name', 'Username', 'Code', 'Price (₱)', 'Time']] }
+      ]
     }
+  });
 
-    if (requests.length > 0) {
-      await sheetsService.spreadsheets.batchUpdate({
-        spreadsheetId,
-        requestBody: { requests }
-      });
-    }
-
-    // Ensure headers are written on both tabs
-    await sheetsService.spreadsheets.values.batchUpdate({
-      spreadsheetId,
-      requestBody: {
-        valueInputOption: 'RAW',
-        data: [
-          { range: "'Buyer Summary'!A1:I1", values: [SUMMARY_HEADERS] },
-          { range: "'Raw Orders'!A1:F1", values: [RAW_HEADERS] }
-        ]
-      }
-    });
-  } catch (err) {
-    console.warn('[Google Sheets] Existing sheet not accessible, creating fresh one:', err.message);
-    return ensureSheet(null);
-  }
+  dailyRegistry[key] = spreadsheetId;
+  saveDailyRegistry();
+  activeSpreadsheetId = spreadsheetId;
+  saveSpreadsheetId(spreadsheetId);
 
   return spreadsheetId;
+}
+
+/**
+ * Compatibility wrapper
+ */
+async function ensureSheet(spreadsheetId) {
+  return ensureDailySpreadsheet();
 }
 
 /**
@@ -520,13 +463,13 @@ async function syncBuyerSummaryTab(spreadsheetId, orders = [], dpRecords = {}) {
   // Clear existing content (preserve headers at row 1)
   await sheetsService.spreadsheets.values.clear({
     spreadsheetId,
-    range: "'Buyer Summary'!A2:I"
+    range: "'buyer summary'!A2:I"
   });
 
   if (summaryRows.length > 0) {
     await sheetsService.spreadsheets.values.update({
       spreadsheetId,
-      range: "'Buyer Summary'!A2",
+      range: "'buyer summary'!A2",
       valueInputOption: 'RAW',
       requestBody: { values: summaryRows }
     });
@@ -534,22 +477,18 @@ async function syncBuyerSummaryTab(spreadsheetId, orders = [], dpRecords = {}) {
 }
 
 /**
- * Automatically appends an order to today's daily worksheet ("tiktok sales-MM.DD.YY")
- * and also keeps the Buyer Summary tab updated.
+ * Automatically appends an order to today's daily spreadsheet file ("tiktok sales-MM.DD.YY")
+ * under 'raw orders' tab, and updates 'buyer summary' tab.
  */
 async function autoAppendOrder(order, dpAmount = 0, currentOrders = null, currentDpRecords = null) {
   if (!sheetsService) return;
   try {
-    // 1. Ensure spreadsheet exists and get/create today's dated sheet
-    const { spreadsheetId, sheetName } = await ensureDailySheet(activeSpreadsheetId);
-    if (spreadsheetId !== activeSpreadsheetId) {
-      saveSpreadsheetId(spreadsheetId);
-    }
+    const spreadsheetId = await ensureDailySpreadsheet();
 
-    // 2. Append row to today's dated worksheet
+    // 1. Append row to 'raw orders'
     await sheetsService.spreadsheets.values.append({
       spreadsheetId,
-      range: `'${sheetName}'!A:E`,
+      range: "'raw orders'!A:E",
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
       requestBody: {
@@ -563,9 +502,10 @@ async function autoAppendOrder(order, dpAmount = 0, currentOrders = null, curren
       }
     });
 
-    console.log(`[Sheets] Order ${order.code} → "${sheetName}"`);
+    const { title } = getDailyDateInfo();
+    console.log(`[Google Sheets] Order ${order.code} appended to 'raw orders' in "${title}".`);
 
-    // 3. Also keep the Buyer Summary tab refreshed (aggregate across all orders today)
+    // 2. Refresh 'buyer summary'
     let ordersToSummarize = currentOrders;
     if (!ordersToSummarize || ordersToSummarize.length === 0) {
       try {
@@ -574,17 +514,19 @@ async function autoAppendOrder(order, dpAmount = 0, currentOrders = null, curren
         ordersToSummarize = [order];
       }
     }
+
     const dpToUse = currentDpRecords || (order.username ? { [order.username]: dpAmount } : {});
     await syncBuyerSummaryTab(spreadsheetId, ordersToSummarize, dpToUse);
   } catch (err) {
-    console.error('[Sheets] autoAppendOrder error:', err.message);
-
+    console.error('[Google Sheets] autoAppendOrder error:', err.message);
   }
 }
 
 app.get('/sheets/info', (req, res) => {
+  const { title } = getDailyDateInfo();
   res.json({
     spreadsheetId: activeSpreadsheetId,
+    title,
     url: activeSpreadsheetId
       ? `https://docs.google.com/spreadsheets/d/${activeSpreadsheetId}/edit`
       : null
@@ -620,14 +562,12 @@ app.post('/sheets/append-order', async (req, res) => {
   }
 });
 
-// Full sync: rewrites 'Raw Orders' with all items AND updates 'Buyer Summary'
+// Full sync: rewrites 'raw orders' with all items AND updates 'buyer summary'
 app.post('/sheets/sync', async (req, res) => {
   const { orders, dpRecords } = req.body;
   try {
-    activeSpreadsheetId = await ensureSheet(activeSpreadsheetId);
-    saveSpreadsheetId(activeSpreadsheetId);
+    const spreadsheetId = await ensureDailySpreadsheet();
 
-    const today = new Date().toLocaleDateString('en-PH');
     let orderList = null;
 
     if (Array.isArray(orders)) {
@@ -643,36 +583,35 @@ app.post('/sheets/sync', async (req, res) => {
       }
     }
 
-    // 1. Rewrite 'Raw Orders'
+    // 1. Rewrite 'raw orders'
     const rawRows = (orderList || []).map(order => [
       order.name,
       order.username,
       order.code,
       order.amount,
-      order.time,
-      today
+      order.time
     ]);
 
     await sheetsService.spreadsheets.values.clear({
-      spreadsheetId: activeSpreadsheetId,
-      range: "'Raw Orders'!A2:F"
+      spreadsheetId,
+      range: "'raw orders'!A2:E"
     });
 
     if (rawRows.length > 0) {
       await sheetsService.spreadsheets.values.update({
-        spreadsheetId: activeSpreadsheetId,
-        range: "'Raw Orders'!A2",
+        spreadsheetId,
+        range: "'raw orders'!A2",
         valueInputOption: 'RAW',
         requestBody: { values: rawRows }
       });
     }
 
-    // 2. Rewrite 'Buyer Summary'
-    await syncBuyerSummaryTab(activeSpreadsheetId, orderList, dpRecords);
+    // 2. Rewrite 'buyer summary'
+    await syncBuyerSummaryTab(spreadsheetId, orderList, dpRecords);
 
     res.json({
       ok: true,
-      spreadsheetId: activeSpreadsheetId,
+      spreadsheetId,
       rawCount: rawRows.length,
       buyerCount: Object.keys(dpRecords || {}).length
     });

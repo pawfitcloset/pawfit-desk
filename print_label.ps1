@@ -9,7 +9,7 @@ if ($installedPrinters -contains $printerName) {
   Write-Host "Xprinter XP-410B not found, using default printer."
 }
 $pd.DefaultPageSettings.PaperSize = New-Object System.Drawing.Printing.PaperSize("Label", 157, 79)
-$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(5, 5, 5, 5)
+$pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(4, 4, 4, 4)
 $lines = Get-Content "C:/Users/Admin/tiktok-dashboard/temp_receipt.txt"
 $pd.add_PrintPage({
   param($sender, $e)

@@ -1058,18 +1058,21 @@ export default function PawfitDesk() {
               {googleConnected && (
                 <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3.5 space-y-1.5">
                   <p className="text-xs font-semibold text-emerald-400 flex items-center gap-1.5">
-                    <Sheet size={13} /> Auto Daily Worksheet
+                    <Sheet size={13} /> Auto Daily Google Spreadsheet
                   </p>
                   <p className="text-[11px] text-zinc-300 leading-relaxed">
-                    Every pin automatically creates a new worksheet for today:<br />
+                    Whenever a pin is created, a new Google Spreadsheet file is generated for that date:<br />
                     <span className="font-mono text-emerald-300 text-[11px] bg-black/40 px-2 py-0.5 rounded mt-1 inline-block">
                       tiktok sales-{(() => { const n=new Date(); return `${String(n.getMonth()+1).padStart(2,'0')}.${String(n.getDate()).padStart(2,'0')}.${String(n.getFullYear()).slice(-2)}`; })()}
                     </span>
                   </p>
+                  <p className="text-[10px] text-zinc-400">
+                    Inside each daily file, two tabs are created: <span className="text-zinc-200 font-semibold">'buyer summary'</span> and <span className="text-zinc-200 font-semibold">'raw orders'</span>.
+                  </p>
                   {sheetUrl && (
                     <a href={sheetUrl} target="_blank" rel="noreferrer"
                       className="text-[11px] text-emerald-400 hover:underline flex items-center gap-1 font-medium mt-1">
-                      Open Spreadsheet <ExternalLink size={10} />
+                      Open Today's Spreadsheet <ExternalLink size={10} />
                     </a>
                   )}
                 </div>
@@ -1079,10 +1082,10 @@ export default function PawfitDesk() {
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
                   <Link2 size={13} className="text-emerald-400" />
-                  Link a Google Sheet (paste URL or ID):
+                  Link a Specific Google Sheet (URL or ID):
                 </label>
                 <p className="text-[11px] text-zinc-400">
-                  Paste any existing Sheet URL. New pins will be added to today's dated worksheet inside it.
+                  Optionally paste a specific Google Sheet link to override.
                 </p>
                 <div className="flex gap-2 pt-1">
                   <input
