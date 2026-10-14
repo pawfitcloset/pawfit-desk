@@ -257,6 +257,31 @@ app.delete('/api/tiktok-session', (req, res) => {
   res.json({ ok: true });
 });
 
+// ─── Euler Stream API Key Management ──────────────────────────────────────────
+// The tiktok-live-connector v2 uses Euler Stream as signing server.
+// Without a key, you hit the anonymous rate limit quickly on deployed servers.
+// Get a free key at https://www.eulerstream.com/pricing
+
+app.get('/api/euler-key', (req, res) => {
+  res.json({ hasKey: !!process.env.EULER_API_KEY });
+});
+
+app.post('/api/euler-key', (req, res) => {
+  const { apiKey } = req.body;
+  if (!apiKey || typeof apiKey !== 'string' || !apiKey.trim()) {
+    return res.status(400).json({ error: 'apiKey is required' });
+  }
+  process.env.EULER_API_KEY = apiKey.trim();
+  console.log('[Euler] API key updated at runtime.');
+  res.json({ ok: true });
+});
+
+app.delete('/api/euler-key', (req, res) => {
+  delete process.env.EULER_API_KEY;
+  console.log('[Euler] API key cleared.');
+  res.json({ ok: true });
+});
+
 app.post('/auth/google-disconnect', async (req, res) => {
   try {
     if (oauth2Client && sheetsService) {
@@ -841,8 +866,11 @@ io.on('connection', (socket) => {
     }
 
     try {
-      // Build session object if TIKTOK_SESSION_ID env var is set
-      // This is required on deployed servers where TikTok blocks anonymous requests
+      // EULER_API_KEY: required for deployed servers to avoid Euler Stream rate limits
+      // Get a free key at https://www.eulerstream.com/pricing
+      const eulerApiKey = process.env.EULER_API_KEY;
+
+      // TIKTOK_SESSION_ID: optional, helps bypass TikTok IP restrictions
       const sessionId = process.env.TIKTOK_SESSION_ID;
       const sessionOpts = sessionId
         ? { session: { cookie: { sessionid: sessionId } } }
@@ -852,13 +880,14 @@ io.on('connection', (socket) => {
         processInitialData: true,
         enableExtendedGiftInfo: false,
         fetchRoomInfoOnConnect: true,
+        ...(eulerApiKey ? { signApiKey: eulerApiKey } : {}),
         ...sessionOpts,
         webClientOptions: {
           timeout: { request: 20000 }
         }
       });
 
-      console.log(`[TikTok] Connecting to @${cleanUsername}${sessionId ? ' (with sessionId)' : ' (anonymous)'}`);
+      console.log(`[TikTok] Connecting to @${cleanUsername} | eulerKey=${eulerApiKey ? '✓' : 'none'} | session=${sessionId ? '✓' : 'none'}`);
 
       tiktokLiveConnection.connect().then(state => {
         console.log(`[TikTok] Connected to roomId ${state.roomId}`);
@@ -866,9 +895,18 @@ io.on('connection', (socket) => {
       }).catch(err => {
         console.error('[TikTok] Failed to connect:', err.message);
         const errMsg = err.message || '';
-        let friendlyMsg = `Hindi makaconnect sa @${cleanUsername}.`;
+        let friendlyMsg;
 
         if (
+          errMsg.toLowerCase().includes('rate_limit') ||
+          errMsg.toLowerCase().includes('rate limit') ||
+          errMsg.toLowerCase().includes('eulerstream') ||
+          errMsg.toLowerCase().includes('sign up for a free api key') ||
+          errMsg.toLowerCase().includes('too many connections')
+        ) {
+          // Euler Stream signing server rate limit
+          friendlyMsg = `⚠️ Euler Stream rate limit! Kailangan ng API key.\n\n1. Pumunta sa eulerstream.com/pricing\n2. Kumuha ng LIBRENG API key\n3. I-set sa Settings → "Euler API Key"\n\nError: ${errMsg}`;
+        } else if (
           errMsg.includes('UserOfflineError') ||
           errMsg.toLowerCase().includes('not live') ||
           errMsg.toLowerCase().includes('offline') ||
@@ -879,20 +917,10 @@ io.on('connection', (socket) => {
           friendlyMsg = `@${cleanUsername} ay hindi mahanap. Siguraduhing tama ang username.`;
         } else if (
           errMsg.toLowerCase().includes('getaddrinfo') ||
-          errMsg.toLowerCase().includes('network') ||
           errMsg.toLowerCase().includes('econnrefused') ||
-          errMsg.toLowerCase().includes('fetch')
+          errMsg.toLowerCase().includes('network')
         ) {
-          friendlyMsg = `Network error sa server. Tingnan ang internet connection ng server.`;
-        } else if (
-          errMsg.includes('403') ||
-          errMsg.includes('429') ||
-          errMsg.toLowerCase().includes('blocked') ||
-          errMsg.toLowerCase().includes('rate limit') ||
-          errMsg.toLowerCase().includes('captcha') ||
-          errMsg.toLowerCase().includes('sign')
-        ) {
-          friendlyMsg = `TikTok ay nag-block ng request mula sa server IP. Kailangan ng TIKTOK_SESSION_ID sa environment variables. Error: ${errMsg}`;
+          friendlyMsg = `Network error sa server. Error: ${errMsg}`;
         } else {
           friendlyMsg = `Hindi makaconnect sa @${cleanUsername}. Error: ${errMsg}`;
         }

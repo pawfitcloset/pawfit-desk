@@ -131,6 +131,46 @@ export default function PawfitDesk() {
     showSheetToast('info', 'TikTok Session ID cleared.');
   }
 
+  // ── Euler Stream API Key (fixes rate limit on deployed servers) ───────────
+  const [eulerKeyInput, setEulerKeyInput]   = useState('');
+  const [eulerHasKey, setEulerHasKey]       = useState(false);
+  const [savingEulerKey, setSavingEulerKey] = useState(false);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/euler-key`)
+      .then(r => r.json())
+      .then(d => setEulerHasKey(d.hasKey))
+      .catch(() => {});
+  }, []);
+
+  async function saveEulerKey() {
+    if (!eulerKeyInput.trim()) return;
+    setSavingEulerKey(true);
+    try {
+      const res = await fetch(`${API_URL}/api/euler-key`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey: eulerKeyInput.trim() })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setEulerHasKey(true);
+        setEulerKeyInput('');
+        showSheetToast('success', 'Euler API key saved! ✓ Subukan ulit mag-connect.');
+      }
+    } catch (e) {
+      showSheetToast('error', 'Failed to save Euler API key');
+    } finally {
+      setSavingEulerKey(false);
+    }
+  }
+
+  async function clearEulerKey() {
+    await fetch(`${API_URL}/api/euler-key`, { method: 'DELETE' }).catch(() => {});
+    setEulerHasKey(false);
+    showSheetToast('info', 'Euler API key cleared.');
+  }
+
   // Fetch server-synced print settings on mount
   useEffect(() => {
     fetch(`${API_URL}/api/settings`)
@@ -1576,6 +1616,64 @@ export default function PawfitDesk() {
                   </button>
                 </div>
               )}
+
+              {/* ── Euler Stream API Key ──────────────────────────── */}
+              <div className="pt-2 border-t border-white/5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                      <span className="text-orange-400">⚡</span> Euler Stream API Key
+                      {eulerHasKey ? (
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">Active ✓</span>
+                      ) : (
+                        <span className="text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-0.5 rounded-full font-bold">Missing!</span>
+                      )}
+                    </p>
+                    <p className="text-[11px] text-zinc-500 mt-0.5">
+                      Kailangan para makapag-connect sa deployed server — libre ang key.
+                    </p>
+                  </div>
+                  {eulerHasKey && (
+                    <button
+                      onClick={clearEulerKey}
+                      className="text-[11px] text-rose-400 hover:text-rose-300 border border-rose-500/20 bg-rose-500/10 px-2.5 py-1 rounded-lg transition-colors shrink-0"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="bg-orange-500/5 border border-orange-500/20 rounded-xl p-3 space-y-1">
+                  <p className="text-[11px] text-orange-400 font-semibold">Paano makuha ang Euler API Key (libre):</p>
+                  <ol className="text-[11px] text-zinc-400 space-y-0.5 list-decimal list-inside">
+                    <li>Pumunta sa <a href="https://www.eulerstream.com/pricing" target="_blank" rel="noreferrer" className="text-orange-300 underline">eulerstream.com/pricing</a></li>
+                    <li>Mag-sign up ng account (libre)</li>
+                    <li>Kopyahin ang iyong API key</li>
+                    <li>I-paste dito at i-save</li>
+                  </ol>
+                  <p className="text-[10px] text-zinc-500 mt-1">
+                    💡 Para permanent, i-add din sa Render → Environment Variables bilang <code className="text-orange-300 bg-black/40 px-1 rounded">EULER_API_KEY</code>
+                  </p>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    placeholder="Paste Euler API key here..."
+                    value={eulerKeyInput}
+                    onChange={(e) => setEulerKeyInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && saveEulerKey()}
+                    className="flex-1 bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder:text-zinc-600 outline-none focus:border-orange-500/50 transition-colors font-mono"
+                  />
+                  <button
+                    onClick={saveEulerKey}
+                    disabled={savingEulerKey || !eulerKeyInput.trim()}
+                    className="bg-orange-500/20 hover:bg-orange-500/30 disabled:opacity-40 text-orange-400 border border-orange-500/30 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors"
+                  >
+                    {savingEulerKey ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
 
               {/* ── TikTok Session ID ─────────────────────────────── */}
               <div className="pt-2 border-t border-white/5 space-y-2.5">
