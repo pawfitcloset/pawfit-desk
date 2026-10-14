@@ -792,9 +792,15 @@ io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
   socket.emit('google-auth-status', { connected: !!sheetsService });
 
-  socket.on('print-invoice', (order) => {
+  socket.on('print-invoice', (payload) => {
+    const order = payload.order || payload;
+    const clientSettings = payload.settings || null;
+    if (clientSettings) {
+      appPrintSettings = { ...appPrintSettings, ...clientSettings };
+      saveAppPrintSettings();
+    }
     console.log(`Received print request for order: ${order.code} by ${order.name}`);
-    printThermalInvoice(order);
+    printThermalInvoice(order, clientSettings || appPrintSettings);
   });
 
   socket.on('connect-tiktok', (username) => {

@@ -439,8 +439,8 @@ export default function PawfitDesk() {
       });
     }
 
-    // 2. Also notify desktop server
-    socket.emit('print-invoice', newOrder);
+    // 2. Also notify desktop server with custom print settings
+    socket.emit('print-invoice', { order: newOrder, settings: printSettingsRef.current });
 
     // 3. Auto-append to Google Sheets (appends raw item and refreshes buyer summary)
     appendOrderToSheet(newOrder, 0, [...orders, newOrder], dpRecords);
@@ -1365,6 +1365,54 @@ export default function PawfitDesk() {
                 />
               </div>
 
+              {/* Live Preview of the Print Layout */}
+              <div className="space-y-1.5">
+                <span className="text-xs font-semibold text-zinc-200">Live Sticker Preview</span>
+                <div className="bg-white text-black p-3.5 rounded-xl border border-white/20 font-sans shadow-lg select-none text-center">
+                  {printSettings.showStoreName && (
+                    <>
+                      <div className="font-bold text-sm tracking-wider uppercase mb-1">
+                        {printSettings.storeName.trim() || 'STORE NAME'}
+                      </div>
+                      <div className="border-b-2 border-black w-full mb-2"></div>
+                    </>
+                  )}
+                  {printSettings.showBuyerName && (
+                    <div className="text-left font-normal text-sm leading-tight">
+                      Buyer: Maria Santos
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center text-xs mt-1 mb-2 text-zinc-800">
+                    {printSettings.showUsername ? <span>@mariasantos</span> : <span></span>}
+                    {printSettings.showTime && <span>10:35 AM</span>}
+                  </div>
+                  {(printSettings.showCode || printSettings.showPrice) && (
+                    <div className="border-2 border-black rounded-lg p-1.5 text-left text-xs mb-2">
+                      {printSettings.showCode && (
+                        <div className="flex items-center gap-3">
+                          <span className="font-bold">CODE</span>
+                          <span className="font-bold text-sm">23</span>
+                        </div>
+                      )}
+                      {printSettings.showPrice && (
+                        <div className="flex items-center gap-3 mt-0.5">
+                          <span className="font-bold">PRICE</span>
+                          <span className="font-bold text-sm">₱129</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {printSettings.showFooter && printSettings.footerText.trim() && (
+                    <>
+                      <div className="border-b border-black w-full my-1.5"></div>
+                      <div className="text-[10px] text-zinc-700">
+                        {printSettings.footerText.trim()}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
               {/* Toggleable Print Fields */}
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
@@ -1491,12 +1539,16 @@ export default function PawfitDesk() {
             </div>
 
             {/* Modal Footer */}
-            <div className="p-3 sm:p-4 border-t border-white/10 bg-white/[0.02] flex justify-end">
+            <div className="p-3 sm:p-4 border-t border-white/10 bg-white/[0.02] flex items-center justify-between gap-2">
+              <span className="text-[11px] text-zinc-400">Settings auto-apply to every pin</span>
               <button
-                onClick={() => setShowSettingsModal(false)}
-                className="bg-white text-black hover:bg-zinc-200 px-4 py-1.5 rounded-xl text-xs font-bold transition-colors"
+                onClick={() => {
+                  updatePrintSettings(printSettings);
+                  setShowSettingsModal(false);
+                }}
+                className="bg-purple-600 hover:bg-purple-500 text-white px-5 py-2 rounded-xl text-xs font-bold transition-all shadow-lg shadow-purple-600/30 flex items-center gap-1.5"
               >
-                Done
+                <CheckCircle2 size={13} /> Save & Apply
               </button>
             </div>
           </div>
