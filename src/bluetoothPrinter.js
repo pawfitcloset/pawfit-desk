@@ -224,7 +224,7 @@ export async function printInvoiceNiimbot(client, order) {
   const printheadPixels = meta?.printheadPixels || 384;
   const scale = printheadPixels / 384;
   const width = printheadPixels;
-  const height = Math.round(280 * scale);
+  const height = Math.round(215 * scale);
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -283,12 +283,12 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // ── 5. Rounded box for CODE & PRICE ─────────────────────────────────────────
+  // ── 5. Rounded box for CODE & PRICE (compact, no inner divider) ──────────────
   ctx.lineWidth = Math.round(2 * scale);
   const boxX = Math.round(8 * scale);
   const boxY = Math.round(104 * scale);
   const boxW = width - Math.round(16 * scale);
-  const boxH = Math.round(106 * scale);
+  const boxH = Math.round(72 * scale);   // smaller box
   const r = Math.round(6 * scale);
 
   ctx.beginPath();
@@ -306,30 +306,23 @@ export async function printInvoiceNiimbot(client, order) {
 
   // CODE row
   ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('CODE', Math.round(22 * scale), boxY + Math.round(28 * scale));
-  autoFitText(ctx, String(order.code), 'bold', 24, scale, boxW - Math.round(80 * scale));
-  ctx.fillText(String(order.code), Math.round(84 * scale), boxY + Math.round(30 * scale));
+  ctx.fillText('CODE', Math.round(22 * scale), boxY + Math.round(22 * scale));
+  autoFitText(ctx, String(order.code), 'bold', 22, scale, boxW - Math.round(80 * scale));
+  ctx.fillText(String(order.code), Math.round(84 * scale), boxY + Math.round(22 * scale));
 
-  // Inner divider
-  ctx.lineWidth = Math.round(1 * scale);
-  ctx.beginPath();
-  ctx.moveTo(boxX + Math.round(6 * scale), boxY + Math.round(42 * scale));
-  ctx.lineTo(boxX + boxW - Math.round(6 * scale), boxY + Math.round(42 * scale));
-  ctx.stroke();
-
-  // PRICE row
+  // PRICE row (no divider line between)
   ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('PRICE', Math.round(22 * scale), boxY + Math.round(72 * scale));
-  ctx.font = `bold ${Math.round(24 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(74 * scale));
+  ctx.fillText('PRICE', Math.round(22 * scale), boxY + Math.round(54 * scale));
+  ctx.font = `bold ${Math.round(22 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(54 * scale));
 
   // ── 6. Footer ────────────────────────────────────────────────────────────────
-  const footerY = Math.round(232 * scale);
+  const footerY = Math.round(205 * scale);
 
   ctx.lineWidth = Math.round(1.5 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(8 * scale), Math.round(222 * scale));
-  ctx.lineTo(width - Math.round(8 * scale), Math.round(222 * scale));
+  ctx.moveTo(Math.round(8 * scale), Math.round(195 * scale));
+  ctx.lineTo(width - Math.round(8 * scale), Math.round(195 * scale));
   ctx.stroke();
 
   ctx.textAlign = 'center';
