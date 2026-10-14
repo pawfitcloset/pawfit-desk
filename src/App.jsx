@@ -924,7 +924,7 @@ export default function PawfitDesk() {
           </div>
           <div>
             <p className="font-semibold text-xs tracking-wide">Printing Invoice...</p>
-            <p className="text-[10px] text-zinc-400 mt-1 font-light">{printToast.name} • Item: <span className="font-medium text-emerald-400">{printToast.code}</span></p>
+            <p className="text-[10px] text-zinc-400 mt-1 font-light">{printToast.name} • Code: <span className="font-medium text-emerald-400">{printToast.code}</span></p>
           </div>
         </div>
       )}

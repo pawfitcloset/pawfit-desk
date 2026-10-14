@@ -13,13 +13,23 @@ $pd.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(5, 
 $lines = Get-Content "C:/Users/Admin/tiktok-dashboard/temp_receipt.txt"
 $pd.add_PrintPage({
   param($sender, $e)
-  $font = New-Object System.Drawing.Font("Arial", 7, [System.Drawing.FontStyle]::Regular)
-  $brush = [System.Drawing.Brushes]::Black
-  $y = [float]2
+  $headerFont = New-Object System.Drawing.Font("Arial", 8, [System.Drawing.FontStyle]::Bold)
+  $buyerFont  = New-Object System.Drawing.Font("Arial", 8, [System.Drawing.FontStyle]::Bold)
+  $codeFont   = New-Object System.Drawing.Font("Arial", 11, [System.Drawing.FontStyle]::Bold)
+  $brush      = [System.Drawing.Brushes]::Black
+  $y          = [float]2
   foreach ($line in $lines) {
     if ($line.Trim() -ne "") {
-      $e.Graphics.DrawString($line, $font, $brush, [float]3, $y)
-      $y += [float]10
+      if ($line -like "*CODE*" -or $line -like "*PRICE*") {
+        $e.Graphics.DrawString($line, $codeFont, $brush, [float]3, $y)
+        $y += [float]13
+      } elseif ($line -like "*BUYER*" -or $line -like "*USER*") {
+        $e.Graphics.DrawString($line, $buyerFont, $brush, [float]3, $y)
+        $y += [float]11
+      } else {
+        $e.Graphics.DrawString($line, $headerFont, $brush, [float]3, $y)
+        $y += [float]10
+      }
     }
   }
   $e.HasMorePages = $false

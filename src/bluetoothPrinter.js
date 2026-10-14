@@ -184,6 +184,20 @@ export async function printTest(printer) {
 // ─── NIIMBOT Specific Printing ────────────────────────────────────────────────
 
 /**
+ * Helper to auto-fit bold text so long buyer names / usernames never get clipped
+ */
+function renderBoldText(ctx, label, value, x, y, maxWidth, baseSize, scale) {
+  let size = baseSize;
+  ctx.font = `bold ${Math.round(size * scale)}px Arial, Helvetica, sans-serif`;
+  const fullText = `${label}${value}`;
+  while (ctx.measureText(fullText).width > maxWidth && size > 11) {
+    size -= 1;
+    ctx.font = `bold ${Math.round(size * scale)}px Arial, Helvetica, sans-serif`;
+  }
+  ctx.fillText(fullText, x, y);
+}
+
+/**
  * Prints a high-resolution label sticker on NIIMBOT B1 / B1 Pro / B21 / D110
  */
 export async function printInvoiceNiimbot(client, order) {
@@ -195,7 +209,7 @@ export async function printInvoiceNiimbot(client, order) {
   const printheadPixels = meta?.printheadPixels || 384;
   const scale = printheadPixels / 384;
   const width = printheadPixels;
-  const height = Math.round(240 * scale); // 30mm standard label height
+  const height = Math.round(250 * scale); // Optimized height for 30mm/40mm label
 
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -211,45 +225,54 @@ export async function printInvoiceNiimbot(client, order) {
 
   // 1. Header: PAWFIT CLOSET
   ctx.textAlign = 'center';
-  ctx.font = `bold ${Math.round(20 * scale)}px sans-serif`;
-  ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(24 * scale));
+  ctx.font = `bold ${Math.round(18 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(22 * scale));
 
   // 2. Divider line
   ctx.lineWidth = Math.round(2 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(12 * scale), Math.round(32 * scale));
-  ctx.lineTo(width - Math.round(12 * scale), Math.round(32 * scale));
+  ctx.moveTo(Math.round(10 * scale), Math.round(30 * scale));
+  ctx.lineTo(width - Math.round(10 * scale), Math.round(30 * scale));
   ctx.stroke();
 
-  // 3. Buyer & Time
+  // 3. Buyer & Username (Large, Bold, High-Visibility)
   ctx.textAlign = 'left';
-  ctx.font = `bold ${Math.round(15 * scale)}px sans-serif`;
+  const maxWidth = width - Math.round(24 * scale);
+
+  // Large Bold Buyer Name
   const buyerName = order.name || 'Anonymous';
-  ctx.fillText(`Buyer: ${buyerName.slice(0, 24)}`, Math.round(16 * scale), Math.round(54 * scale));
+  renderBoldText(ctx, 'BUYER: ', buyerName, Math.round(14 * scale), Math.round(54 * scale), maxWidth, 18, scale);
 
-  ctx.font = `${Math.round(13 * scale)}px sans-serif`;
-  const buyerUser = order.username ? `${order.username}  ` : '';
+  // Large Bold Username & Time
+  const username = order.username || '';
   const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  ctx.fillText(`${buyerUser}• ${orderTime}`, Math.round(16 * scale), Math.round(74 * scale));
+  const userText = username ? `${username} (${orderTime})` : orderTime;
+  renderBoldText(ctx, 'USER:  ', userText, Math.round(14 * scale), Math.round(78 * scale), maxWidth, 16, scale);
 
-  // 4. Highlight Box for ITEM CODE & PRICE
+  // 4. Highlight Box for CODE & PRICE
   ctx.lineWidth = Math.round(2 * scale);
-  const boxTop = Math.round(86 * scale);
-  const boxHeight = Math.round(92 * scale);
-  ctx.strokeRect(Math.round(14 * scale), boxTop, width - Math.round(28 * scale), boxHeight);
+  const boxTop = Math.round(92 * scale);
+  const boxHeight = Math.round(104 * scale);
+  ctx.strokeRect(Math.round(10 * scale), boxTop, width - Math.round(20 * scale), boxHeight);
 
-  // Large Item Code
-  ctx.font = `bold ${Math.round(28 * scale)}px sans-serif`;
-  ctx.fillText(`ITEM: ${order.code}`, Math.round(24 * scale), boxTop + Math.round(38 * scale));
+  // Large CODE (Changed from ITEM)
+  ctx.font = `bold ${Math.round(30 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(`CODE: ${order.code}`, Math.round(22 * scale), boxTop + Math.round(42 * scale));
 
-  // Large Price
-  ctx.font = `bold ${Math.round(24 * scale)}px sans-serif`;
-  ctx.fillText(`PRICE: P${order.amount}`, Math.round(24 * scale), boxTop + Math.round(74 * scale));
+  // Large PRICE
+  ctx.font = `bold ${Math.round(26 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText(`PRICE: P${order.amount}`, Math.round(22 * scale), boxTop + Math.round(84 * scale));
 
-  // 5. Footer
+  // 5. Divider & Footer
+  ctx.lineWidth = Math.round(1 * scale);
+  ctx.beginPath();
+  ctx.moveTo(Math.round(10 * scale), Math.round(214 * scale));
+  ctx.lineTo(width - Math.round(10 * scale), Math.round(214 * scale));
+  ctx.stroke();
+
   ctx.textAlign = 'center';
-  ctx.font = `${Math.round(11 * scale)}px sans-serif`;
-  ctx.fillText('Thank you for shopping! • TikTok Live', width / 2, Math.round(214 * scale));
+  ctx.font = `bold ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('Thank you for shopping! • TikTok Live', width / 2, Math.round(234 * scale));
 
   // Encode canvas into Niimbot raster packet protocol
   const encodedImage = ImageEncoder.encodeCanvas(
@@ -261,7 +284,7 @@ export async function printInvoiceNiimbot(client, order) {
   const taskType = client.getPrintTaskType() || 'B1';
   const printTask = client.protocol.newPrintTask(taskType, {
     totalPages: 1,
-    density: meta?.densityDefault || 3,
+    density: 5, // Maximum density for darkest, sharpest thermal print
     labelType: LabelType.WithGaps
   });
 
@@ -379,18 +402,23 @@ export async function printInvoiceEscPos(characteristic, order) {
   const divider = encoder.encode("--------------------------------\n");
 
   const leftAlign = new Uint8Array([ESC, 0x61, 0x00]);
-  const details = encoder.encode(
-    `Buyer: ${order.name || 'Anonymous'}\n` +
-    `User:  ${order.username || ''}\n` +
-    `Time:  ${order.time || ''}\n`
+
+  // Bold Buyer and Username details
+  const boldOn = new Uint8Array([ESC, 0x45, 0x01]);
+  const boldOff = new Uint8Array([ESC, 0x45, 0x00]);
+  const buyerDetails = encoder.encode(
+    `BUYER: ${order.name || 'Anonymous'}\n` +
+    `USER:  ${order.username || ''}\n` +
+    `TIME:  ${order.time || ''}\n`
   );
 
-  const boldOn = new Uint8Array([ESC, 0x45, 0x01, GS, 0x21, 0x11]);
-  const itemInfo = encoder.encode(
-    `ITEM:  ${order.code}\n` +
+  // Large Bold CODE and PRICE
+  const bigFontOn = new Uint8Array([ESC, 0x45, 0x01, GS, 0x21, 0x11]);
+  const codeInfo = encoder.encode(
+    `CODE:  ${order.code}\n` +
     `PRICE: P${order.amount}\n`
   );
-  const boldOff = new Uint8Array([ESC, 0x45, 0x00, GS, 0x21, 0x00]);
+  const bigFontOff = new Uint8Array([ESC, 0x45, 0x00, GS, 0x21, 0x00]);
 
   const footer = encoder.encode("--------------------------------\nThank you for shopping!\n");
   const feedCmd = new Uint8Array([ESC, 0x64, 0x04]);
@@ -400,10 +428,12 @@ export async function printInvoiceEscPos(characteristic, order) {
     header,
     divider,
     leftAlign,
-    details,
     boldOn,
-    itemInfo,
+    buyerDetails,
     boldOff,
+    bigFontOn,
+    codeInfo,
+    bigFontOff,
     footer,
     feedCmd
   ]);
