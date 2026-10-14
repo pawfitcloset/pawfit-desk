@@ -667,17 +667,63 @@ app.post('/sheets/sync', async (req, res) => {
   }
 });
 
+// ─── Settings Persistence ───────────────────────────────────────────────────
+const SETTINGS_PATH = path.join(process.cwd(), 'print-settings.json');
+let appPrintSettings = {
+  storeName: 'PAWFIT CLOSET',
+  showStoreName: true,
+  showBuyerName: true,
+  showUsername: true,
+  showTime: true,
+  showCode: true,
+  showPrice: true,
+  showFooter: true,
+  footerText: 'Thank you for shopping! TikTok Live'
+};
+
+try {
+  if (fs.existsSync(SETTINGS_PATH)) {
+    const loaded = JSON.parse(fs.readFileSync(SETTINGS_PATH, 'utf8'));
+    appPrintSettings = { ...appPrintSettings, ...loaded };
+  }
+} catch (e) {
+  console.warn('Could not load print settings:', e.message);
+}
+
+function saveAppPrintSettings() {
+  try {
+    fs.writeFileSync(SETTINGS_PATH, JSON.stringify(appPrintSettings, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Could not save print settings:', e.message);
+  }
+}
+
+app.get('/api/settings', (req, res) => {
+  res.json(appPrintSettings);
+});
+
+app.post('/api/settings', (req, res) => {
+  appPrintSettings = { ...appPrintSettings, ...req.body };
+  saveAppPrintSettings();
+  res.json({ ok: true, settings: appPrintSettings });
+});
+
 // ─── Thermal Printing ─────────────────────────────────────────────────────────
 
 let tiktokLiveConnection = null;
 
 function printThermalInvoice(order) {
-  const receiptText = `PAWFIT CLOSET
-BUYER: ${order.name}
-USER:  ${order.username}
-CODE:  ${order.code}
-PRICE: P${order.amount}
-\n`;
+  const store = appPrintSettings.showStoreName ? (appPrintSettings.storeName || 'PAWFIT CLOSET') : '';
+  let linesArr = [];
+  if (store) linesArr.push(store);
+  if (appPrintSettings.showBuyerName) linesArr.push(`BUYER: ${order.name || 'Anonymous'}`);
+  if (appPrintSettings.showUsername) linesArr.push(`USER:  ${order.username || ''}`);
+  if (appPrintSettings.showCode) linesArr.push(`CODE:  ${order.code}`);
+  if (appPrintSettings.showPrice) linesArr.push(`PRICE: P${order.amount}`);
+  if (appPrintSettings.showTime) linesArr.push(`TIME:  ${order.time || ''}`);
+  if (appPrintSettings.showFooter && appPrintSettings.footerText) linesArr.push(appPrintSettings.footerText);
+
+  const receiptText = linesArr.join('\n') + '\n\n';
 
   const tempFilePath = path.join(process.cwd(), 'temp_receipt.txt');
   const psFilePath = path.join(process.cwd(), 'print_label.ps1');

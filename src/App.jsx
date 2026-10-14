@@ -23,7 +23,9 @@ import {
   Bluetooth,
   X,
   Link2,
-  HelpCircle
+  HelpCircle,
+  Settings,
+  User
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { 
@@ -61,6 +63,58 @@ export default function PawfitDesk() {
   const [showSheetsModal, setShowSheetsModal] = useState(false);
   const [customSheetInput, setCustomSheetInput] = useState('');
   const [savingCustomSheet, setSavingCustomSheet] = useState(false);
+
+  // ── User Profile & Print Customization Settings ───────────────────────────
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [printSettings, setPrintSettings] = useState(() => {
+    try {
+      const saved = localStorage.getItem('pawfit_print_settings');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return {
+      storeName: 'Pawfit Closet',
+      showStoreName: true,
+      showBuyerName: true,
+      showUsername: true,
+      showTime: true,
+      showCode: true,
+      showPrice: true,
+      showFooter: true,
+      footerText: 'Thank you for shopping! TikTok Live'
+    };
+  });
+  const printSettingsRef = useRef(printSettings);
+  useEffect(() => {
+    printSettingsRef.current = printSettings;
+    try {
+      localStorage.setItem('pawfit_print_settings', JSON.stringify(printSettings));
+    } catch (e) {}
+  }, [printSettings]);
+
+  // Fetch server-synced print settings on mount
+  useEffect(() => {
+    fetch(`${API_URL}/api/settings`)
+      .then(r => r.json())
+      .then(data => {
+        if (data && data.storeName !== undefined) {
+          setPrintSettings(prev => ({ ...prev, ...data }));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  async function updatePrintSettings(newSettings) {
+    const merged = { ...printSettings, ...newSettings };
+    setPrintSettings(merged);
+    try {
+      await fetch(`${API_URL}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(merged)
+      });
+      showSheetToast('success', 'Print settings saved! ✓');
+    } catch (e) {}
+  }
 
   async function handleSaveCustomSheet() {
     if (!customSheetInput.trim()) return;
@@ -178,7 +232,7 @@ export default function PawfitDesk() {
     if (!btPrinterRef.current) return;
     try {
       showSheetToast('info', 'Printing test label...');
-      await printTest(btPrinterRef.current);
+      await printTest(btPrinterRef.current, printSettingsRef.current);
       showSheetToast('success', 'Test print sent successfully! ✓');
     } catch (err) {
       alert(`Test print error: ${err.message}`);
@@ -306,7 +360,7 @@ export default function PawfitDesk() {
       // Auto-print on phone if Bluetooth printer is connected!
       if (btPrinterRef.current) {
         try {
-          await printInvoice(btPrinterRef.current, order);
+          await printInvoice(btPrinterRef.current, order, printSettingsRef.current);
           showSheetToast('success', `Sticker Printed: ${order.name} (${order.code}) ✓`);
         } catch (err) {
           console.warn('Bluetooth auto-print error:', err.message);
@@ -559,11 +613,28 @@ export default function PawfitDesk() {
                   {googleConnected ? 'Sheets' : 'Link'}
                 </span>
               </button>
+
+              <button
+                onClick={() => setShowSettingsModal(true)}
+                className="bg-black/60 text-zinc-400 hover:text-white border border-white/10 p-1.5 rounded-lg text-xs transition-colors"
+                title="User Profile & Print Settings"
+              >
+                <Settings size={13} />
+              </button>
             </div>
           </div>
           
           {/* Controls: Input, Reset, Start Live */}
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
+            {/* Desktop Settings / User Profile Button */}
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              className="hidden lg:flex items-center gap-1.5 bg-black/60 hover:bg-white/5 border border-white/10 hover:border-white/20 rounded-xl px-3 py-2 h-9 text-[11px] font-semibold text-zinc-300 hover:text-white transition-colors"
+              title="User Profile & Print Receipt Settings"
+            >
+              <Settings size={14} className="text-zinc-400" />
+              <span>Settings</span>
+            </button>
             {/* Desktop Bluetooth Widget */}
             <div className="hidden lg:flex items-center gap-2 bg-black/60 border border-white/10 rounded-xl px-3 py-2 h-9">
               <Bluetooth size={14} className={btPrinter ? 'text-blue-400 animate-pulse' : 'text-zinc-500'} />
@@ -1192,6 +1263,240 @@ export default function PawfitDesk() {
               >
                 <Bluetooth size={14} />
                 Connect NIIMBOT Now
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── User Profile & Print Settings Modal ────────────────────────────── */}
+      {showSettingsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-[#121214] border border-white/10 rounded-2xl w-full max-w-lg shadow-[0_10px_40px_rgba(0,0,0,0.8)] overflow-hidden max-h-[90vh] flex flex-col">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b border-white/10 bg-white/[0.02]">
+              <div className="flex items-center gap-2.5">
+                <div className="bg-purple-500/20 text-purple-400 p-2 rounded-xl border border-purple-500/20">
+                  <Settings size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-white">Store & Print Settings</h3>
+                  <p className="text-[11px] text-zinc-400">Customize store name and optional receipt fields</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowSettingsModal(false)}
+                className="text-zinc-500 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-5 space-y-5 overflow-y-auto flex-1">
+              {/* Logged in User Profile Card */}
+              <div className="bg-black/50 border border-white/5 rounded-xl p-3.5 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {googleUser?.picture ? (
+                    <img 
+                      src={googleUser.picture} 
+                      alt={googleUser.name} 
+                      className="w-10 h-10 rounded-full border-2 border-emerald-500/40"
+                    />
+                  ) : (
+                    <div className="w-10 h-10 rounded-full bg-white/10 border border-white/10 flex items-center justify-center text-zinc-300 font-bold text-sm">
+                      <User size={18} />
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs font-semibold text-white">
+                      {googleUser?.name || 'Local Seller Profile'}
+                    </p>
+                    <p className="text-[11px] text-zinc-400">
+                      {googleUser?.email || (googleConnected ? 'Google Account Connected' : 'Guest / Offline Mode')}
+                    </p>
+                  </div>
+                </div>
+
+                {!googleConnected ? (
+                  <button
+                    onClick={() => { setShowSettingsModal(false); connectGoogle(); }}
+                    className="text-xs bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg font-semibold transition-all"
+                  >
+                    Google Login
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { setShowSettingsModal(false); disconnectGoogle(); }}
+                    className="text-xs text-rose-400 hover:text-rose-300 border border-rose-500/20 bg-rose-500/10 px-2.5 py-1.5 rounded-lg font-medium transition-colors"
+                  >
+                    Switch Account
+                  </button>
+                )}
+              </div>
+
+              {/* Store Name Input */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-200 flex items-center justify-between">
+                  <span>Store Name on Receipts</span>
+                  <span className="text-[10px] text-zinc-500 font-normal">Replaces 'PAWFIT CLOSET'</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. My Awesome Shop"
+                  value={printSettings.storeName}
+                  onChange={(e) => updatePrintSettings({ storeName: e.target.value })}
+                  className="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition-colors font-medium"
+                />
+              </div>
+
+              {/* Receipt Footer Note */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-200 flex items-center justify-between">
+                  <span>Footer Note</span>
+                  <span className="text-[10px] text-zinc-500 font-normal">Bottom greeting on sticker</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Thank you for shopping! TikTok Live"
+                  value={printSettings.footerText}
+                  onChange={(e) => updatePrintSettings({ footerText: e.target.value })}
+                  className="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-zinc-600 outline-none focus:border-purple-500/50 transition-colors"
+                />
+              </div>
+
+              {/* Toggleable Print Fields */}
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-zinc-200">Optional Print Fields</span>
+                  <span className="text-[10px] text-zinc-500">Uncheck fields you don't want printed</span>
+                </div>
+
+                <div className="bg-black/40 border border-white/5 rounded-xl divide-y divide-white/5">
+                  {/* Store Name Header */}
+                  <label className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.02] transition-colors">
+                    <div>
+                      <p className="text-xs font-medium text-white">Store Name & Top Divider</p>
+                      <p className="text-[10px] text-zinc-500">Prints store name at the top of the sticker</p>
+                    </div>
+                    <input 
+                      type="checkbox"
+                      checked={printSettings.showStoreName}
+                      onChange={(e) => updatePrintSettings({ showStoreName: e.target.checked })}
+                      className="w-4 h-4 rounded border-white/20 text-purple-600 focus:ring-0 focus:ring-offset-0 bg-zinc-900 cursor-pointer accent-purple-500"
+                    />
+                  </label>
+
+                  {/* Buyer Name */}
+                  <label className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.02] transition-colors">
+                    <div>
+                      <p className="text-xs font-medium text-white">Buyer Name ("Buyer: Maria Santos")</p>
+                      <p className="text-[10px] text-zinc-500">Full buyer name above username</p>
+                    </div>
+                    <input 
+                      type="checkbox"
+                      checked={printSettings.showBuyerName}
+                      onChange={(e) => updatePrintSettings({ showBuyerName: e.target.checked })}
+                      className="w-4 h-4 rounded border-white/20 text-purple-600 focus:ring-0 focus:ring-offset-0 bg-zinc-900 cursor-pointer accent-purple-500"
+                    />
+                  </label>
+
+                  {/* Username */}
+                  <label className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.02] transition-colors">
+                    <div>
+                      <p className="text-xs font-medium text-white">TikTok Username ("@username")</p>
+                      <p className="text-[10px] text-zinc-500">User's TikTok handle</p>
+                    </div>
+                    <input 
+                      type="checkbox"
+                      checked={printSettings.showUsername}
+                      onChange={(e) => updatePrintSettings({ showUsername: e.target.checked })}
+                      className="w-4 h-4 rounded border-white/20 text-purple-600 focus:ring-0 focus:ring-offset-0 bg-zinc-900 cursor-pointer accent-purple-500"
+                    />
+                  </label>
+
+                  {/* Order Time */}
+                  <label className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.02] transition-colors">
+                    <div>
+                      <p className="text-xs font-medium text-white">Time Timestamp</p>
+                      <p className="text-[10px] text-zinc-500">Time the comment was pinned (e.g. 10:35 AM)</p>
+                    </div>
+                    <input 
+                      type="checkbox"
+                      checked={printSettings.showTime}
+                      onChange={(e) => updatePrintSettings({ showTime: e.target.checked })}
+                      className="w-4 h-4 rounded border-white/20 text-purple-600 focus:ring-0 focus:ring-offset-0 bg-zinc-900 cursor-pointer accent-purple-500"
+                    />
+                  </label>
+
+                  {/* Item Code */}
+                  <label className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.02] transition-colors">
+                    <div>
+                      <p className="text-xs font-medium text-white">Item Code ("CODE 23")</p>
+                      <p className="text-[10px] text-zinc-500">Mined item code in the box</p>
+                    </div>
+                    <input 
+                      type="checkbox"
+                      checked={printSettings.showCode}
+                      onChange={(e) => updatePrintSettings({ showCode: e.target.checked })}
+                      className="w-4 h-4 rounded border-white/20 text-purple-600 focus:ring-0 focus:ring-offset-0 bg-zinc-900 cursor-pointer accent-purple-500"
+                    />
+                  </label>
+
+                  {/* Price */}
+                  <label className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.02] transition-colors">
+                    <div>
+                      <p className="text-xs font-medium text-white">Price ("PRICE ₱129")</p>
+                      <p className="text-[10px] text-zinc-500">Item price in the box</p>
+                    </div>
+                    <input 
+                      type="checkbox"
+                      checked={printSettings.showPrice}
+                      onChange={(e) => updatePrintSettings({ showPrice: e.target.checked })}
+                      className="w-4 h-4 rounded border-white/20 text-purple-600 focus:ring-0 focus:ring-offset-0 bg-zinc-900 cursor-pointer accent-purple-500"
+                    />
+                  </label>
+
+                  {/* Footer Text */}
+                  <label className="flex items-center justify-between p-3 cursor-pointer hover:bg-white/[0.02] transition-colors">
+                    <div>
+                      <p className="text-xs font-medium text-white">Footer Greeting & Line</p>
+                      <p className="text-[10px] text-zinc-500">Bottom message on the sticker</p>
+                    </div>
+                    <input 
+                      type="checkbox"
+                      checked={printSettings.showFooter}
+                      onChange={(e) => updatePrintSettings({ showFooter: e.target.checked })}
+                      className="w-4 h-4 rounded border-white/20 text-purple-600 focus:ring-0 focus:ring-offset-0 bg-zinc-900 cursor-pointer accent-purple-500"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Test Print with Current Settings */}
+              {btPrinter && (
+                <div className="pt-2 border-t border-white/5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-zinc-300">Test Your Label</p>
+                    <p className="text-[10px] text-zinc-500">Send a test sticker to verify layout</p>
+                  </div>
+                  <button
+                    onClick={handleTestPrintBluetooth}
+                    className="flex items-center gap-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors"
+                  >
+                    <Printer size={12} /> Test Print
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 sm:p-4 border-t border-white/10 bg-white/[0.02] flex justify-end">
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                className="bg-white text-black hover:bg-zinc-200 px-4 py-1.5 rounded-xl text-xs font-bold transition-colors"
+              >
+                Done
               </button>
             </div>
           </div>

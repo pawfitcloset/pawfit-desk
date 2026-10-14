@@ -149,16 +149,16 @@ export async function disconnectBluetoothPrinter(printer) {
  * Unified Print Invoice Function
  * Automatically routes to Niimbot protocol or ESC/POS based on printer type.
  */
-export async function printInvoice(printer, order) {
+export async function printInvoice(printer, order, settings = {}) {
   if (!printer) throw new Error('Bluetooth printer is not connected.');
 
   if (printer.type === 'niimbot') {
-    return printInvoiceNiimbot(printer.client, order);
+    return printInvoiceNiimbot(printer.client, order, settings);
   } else if (printer.type === 'escpos') {
-    return printInvoiceEscPos(printer.characteristic, order);
+    return printInvoiceEscPos(printer.characteristic, order, settings);
   } else if (printer.characteristic) {
     // Backward compatibility if raw characteristic passed
-    return printInvoiceEscPos(printer.characteristic, order);
+    return printInvoiceEscPos(printer.characteristic, order, settings);
   } else {
     throw new Error('Unknown printer type.');
   }
@@ -167,15 +167,15 @@ export async function printInvoice(printer, order) {
 /**
  * Unified Test Print Function
  */
-export async function printTest(printer) {
+export async function printTest(printer, settings = {}) {
   if (!printer) throw new Error('Bluetooth printer is not connected.');
 
   if (printer.type === 'niimbot') {
-    return testPrintNiimbot(printer.client);
+    return testPrintNiimbot(printer.client, settings);
   } else if (printer.type === 'escpos') {
-    return testPrintEscPos(printer.characteristic);
+    return testPrintEscPos(printer.characteristic, settings);
   } else if (printer.characteristic) {
-    return testPrintEscPos(printer.characteristic);
+    return testPrintEscPos(printer.characteristic, settings);
   } else {
     throw new Error('Unknown printer type.');
   }
@@ -198,27 +198,24 @@ function autoFitText(ctx, text, fontStyle, baseSize, scale, maxWidth) {
 }
 
 /**
- * Prints a high-resolution label sticker on NIIMBOT B1 / B1 Pro / B21 / D110
- *
- * Layout:
- *   ┌──────────────────────────────────┐
- *   │        PAWFIT CLOSET             │
- *   ├──────────────────────────────────┤
- *   │  Buyer: Maria Santos             │  ← large, not bold
- *   │  @mariasantos          10:35 AM  │  ← username, time right-aligned
- *   ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
- *   │ ╭──────────────────────────────╮ │
- *   │ │ CODE    23                   │ │
- *   │ │ PRICE   P129                 │ │
- *   │ ╰──────────────────────────────╯ │
- *   ├──────────────────────────────────┤
- *   │      Thank you for shopping!     │
- *   └──────────────────────────────────┘
+ * Prints a customizable label sticker on NIIMBOT B1 / B1 Pro / B21 / D110
  */
-export async function printInvoiceNiimbot(client, order) {
+export async function printInvoiceNiimbot(client, order, settings = {}) {
   if (!client || !client.isConnected()) {
     throw new Error('NIIMBOT printer is not connected.');
   }
+
+  const {
+    storeName = 'PAWFIT CLOSET',
+    showStoreName = true,
+    showBuyerName = true,
+    showUsername = true,
+    showTime = true,
+    showCode = true,
+    showPrice = true,
+    showFooter = true,
+    footerText = 'Thank you for shopping! TikTok Live'
+  } = settings;
 
   const meta = client.getModelMetadata();
   const printheadPixels = meta?.printheadPixels || 384;
@@ -237,89 +234,112 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.fillStyle = '#000000';
   ctx.strokeStyle = '#000000';
 
-  // ── 1. Header: PAWFIT CLOSET ─────────────────────────────────────────────────
-  ctx.textAlign = 'center';
-  ctx.font = `bold ${Math.round(18 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(25 * scale));
+  // ── 1. Header: Store Name ───────────────────────────────────────────────────
+  if (showStoreName && storeName.trim()) {
+    ctx.textAlign = 'center';
+    autoFitText(ctx, storeName.trim().toUpperCase(), 'bold', 18, scale, width - Math.round(30 * scale));
+    ctx.fillText(storeName.trim().toUpperCase(), width / 2, Math.round(25 * scale));
 
-  ctx.lineWidth = Math.round(2.5 * scale);
-  ctx.beginPath();
-  ctx.moveTo(Math.round(8 * scale), Math.round(35 * scale));
-  ctx.lineTo(width - Math.round(8 * scale), Math.round(35 * scale));
-  ctx.stroke();
+    ctx.lineWidth = Math.round(2.5 * scale);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(8 * scale), Math.round(35 * scale));
+    ctx.lineTo(width - Math.round(8 * scale), Math.round(35 * scale));
+    ctx.stroke();
+  }
 
   // ── 2. Buyer Name ─────────────────────────────────────────────────────────────
-  ctx.textAlign = 'left';
   const padL = Math.round(14 * scale);
   const maxW = width - Math.round(28 * scale);
 
-  const buyerLabel = 'Buyer: ';
-  const buyerName = order.name || 'Anonymous';
-  const fullBuyer = `${buyerLabel}${buyerName}`;
-  autoFitText(ctx, fullBuyer, 'normal', 32, scale, maxW);
-  ctx.fillText(fullBuyer, padL, Math.round(65 * scale));
+  if (showBuyerName) {
+    ctx.textAlign = 'left';
+    const buyerLabel = 'Buyer: ';
+    const buyerName = order.name || 'Anonymous';
+    const fullBuyer = `${buyerLabel}${buyerName}`;
+    autoFitText(ctx, fullBuyer, 'normal', 32, scale, maxW);
+    ctx.fillText(fullBuyer, padL, Math.round(65 * scale));
+  }
 
-  // ── 3. Username ───────────────────────────────────────────────────────────────
+  // ── 3. Username & 4. Time ─────────────────────────────────────────────────────
   const username = (order.username || '').replace(/^@+/, '');
   const displayUser = username ? `@${username}` : '';
-  if (displayUser) {
-    autoFitText(ctx, displayUser, 'normal', 18, scale, maxW - Math.round(60 * scale));
+  if (showUsername && displayUser) {
+    ctx.textAlign = 'left';
+    autoFitText(ctx, displayUser, 'normal', 18, scale, maxW - Math.round(70 * scale));
     ctx.fillText(displayUser, padL, Math.round(100 * scale));
   }
 
-  // ── 4. Time — right-aligned same line as username ─────────────────────────────
-  const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  ctx.textAlign = 'right';
-  ctx.font = `normal ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(100 * scale));
-  ctx.textAlign = 'left';
+  if (showTime) {
+    const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    ctx.textAlign = 'right';
+    ctx.font = `normal ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(100 * scale));
+    ctx.textAlign = 'left';
+  }
 
   // ── 5. Rounded box for CODE & PRICE ──────────────────────────────────────────
-  ctx.lineWidth = Math.round(2 * scale);
-  const boxX = Math.round(8 * scale);
-  const boxY = Math.round(115 * scale);
-  const boxW = width - Math.round(16 * scale);
-  const boxH = Math.round(70 * scale);  // box bottom = 185
-  const r = Math.round(6 * scale);
+  if (showCode || showPrice) {
+    ctx.lineWidth = Math.round(2 * scale);
+    const boxX = Math.round(8 * scale);
+    const boxY = Math.round(115 * scale);
+    const boxW = width - Math.round(16 * scale);
+    const boxH = Math.round(70 * scale);  // box bottom = 185
+    const r = Math.round(6 * scale);
 
-  ctx.beginPath();
-  ctx.moveTo(boxX + r, boxY);
-  ctx.lineTo(boxX + boxW - r, boxY);
-  ctx.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + r, r);
-  ctx.lineTo(boxX + boxW, boxY + boxH - r);
-  ctx.arcTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH, r);
-  ctx.lineTo(boxX + r, boxY + boxH);
-  ctx.arcTo(boxX, boxY + boxH, boxX, boxY + boxH - r, r);
-  ctx.lineTo(boxX, boxY + r);
-  ctx.arcTo(boxX, boxY, boxX + r, boxY, r);
-  ctx.closePath();
-  ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(boxX + r, boxY);
+    ctx.lineTo(boxX + boxW - r, boxY);
+    ctx.arcTo(boxX + boxW, boxY, boxX + boxW, boxY + r, r);
+    ctx.lineTo(boxX + boxW, boxY + boxH - r);
+    ctx.arcTo(boxX + boxW, boxY + boxH, boxX + boxW - r, boxY + boxH, r);
+    ctx.lineTo(boxX + r, boxY + boxH);
+    ctx.arcTo(boxX, boxY + boxH, boxX, boxY + boxH - r, r);
+    ctx.lineTo(boxX, boxY + r);
+    ctx.arcTo(boxX, boxY, boxX + r, boxY, r);
+    ctx.closePath();
+    ctx.stroke();
 
-  // CODE row
-  ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('CODE', Math.round(22 * scale), boxY + Math.round(22 * scale));
-  autoFitText(ctx, String(order.code), 'bold', 22, scale, boxW - Math.round(80 * scale));
-  ctx.fillText(String(order.code), Math.round(84 * scale), boxY + Math.round(22 * scale));
+    // Both code and price, or single line centered
+    if (showCode && showPrice) {
+      // CODE row
+      ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
+      ctx.fillText('CODE', Math.round(22 * scale), boxY + Math.round(22 * scale));
+      autoFitText(ctx, String(order.code), 'bold', 22, scale, boxW - Math.round(80 * scale));
+      ctx.fillText(String(order.code), Math.round(84 * scale), boxY + Math.round(22 * scale));
 
-  // PRICE row
-  ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('PRICE', Math.round(22 * scale), boxY + Math.round(54 * scale));
-  ctx.font = `bold ${Math.round(22 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(54 * scale));
+      // PRICE row
+      ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
+      ctx.fillText('PRICE', Math.round(22 * scale), boxY + Math.round(54 * scale));
+      ctx.font = `bold ${Math.round(22 * scale)}px Arial, Helvetica, sans-serif`;
+      ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(54 * scale));
+    } else if (showCode) {
+      ctx.font = `bold ${Math.round(15 * scale)}px Arial, Helvetica, sans-serif`;
+      ctx.fillText('CODE', Math.round(22 * scale), boxY + Math.round(40 * scale));
+      autoFitText(ctx, String(order.code), 'bold', 24, scale, boxW - Math.round(80 * scale));
+      ctx.fillText(String(order.code), Math.round(84 * scale), boxY + Math.round(40 * scale));
+    } else if (showPrice) {
+      ctx.font = `bold ${Math.round(15 * scale)}px Arial, Helvetica, sans-serif`;
+      ctx.fillText('PRICE', Math.round(22 * scale), boxY + Math.round(40 * scale));
+      ctx.font = `bold ${Math.round(24 * scale)}px Arial, Helvetica, sans-serif`;
+      ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(40 * scale));
+    }
+  }
 
   // ── 6. Footer ────────────────────────────────────────────────────────────────
-  const footerLineY = Math.round(200 * scale);
-  const footerY     = Math.round(215 * scale);
+  if (showFooter && footerText.trim()) {
+    const footerLineY = Math.round(200 * scale);
+    const footerY     = Math.round(215 * scale);
 
-  ctx.lineWidth = Math.round(1.5 * scale);
-  ctx.beginPath();
-  ctx.moveTo(Math.round(8 * scale), footerLineY);
-  ctx.lineTo(width - Math.round(8 * scale), footerLineY);
-  ctx.stroke();
+    ctx.lineWidth = Math.round(1.5 * scale);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(8 * scale), footerLineY);
+    ctx.lineTo(width - Math.round(8 * scale), footerLineY);
+    ctx.stroke();
 
-  ctx.textAlign = 'center';
-  ctx.font = `normal ${Math.round(10 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('Thank you for shopping! TikTok Live', width / 2, footerY);
+    ctx.textAlign = 'center';
+    ctx.font = `normal ${Math.round(10 * scale)}px Arial, Helvetica, sans-serif`;
+    ctx.fillText(footerText.trim(), width / 2, footerY);
+  }
 
   // ── Encode & Send to Printer ─────────────────────────────────────────────────
   const encodedImage = ImageEncoder.encodeCanvas(
@@ -348,11 +368,12 @@ export async function printInvoiceNiimbot(client, order) {
 /**
  * Print a quick test label on NIIMBOT B1 / B1 Pro
  */
-export async function testPrintNiimbot(client) {
+export async function testPrintNiimbot(client, settings = {}) {
   if (!client || !client.isConnected()) {
     throw new Error('NIIMBOT printer is not connected.');
   }
 
+  const storeName = settings.storeName || 'PAWFIT DESK';
   const meta = client.getModelMetadata();
   const printheadPixels = meta?.printheadPixels || 384;
   const scale = printheadPixels / 384;
@@ -371,8 +392,8 @@ export async function testPrintNiimbot(client) {
 
   // Header title
   ctx.textAlign = 'center';
-  ctx.font = `bold ${Math.round(20 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('PAWFIT DESK', width / 2, Math.round(24 * scale));
+  autoFitText(ctx, storeName.toUpperCase(), 'bold', 20, scale, width - Math.round(24 * scale));
+  ctx.fillText(storeName.toUpperCase(), width / 2, Math.round(24 * scale));
 
   ctx.lineWidth = Math.round(2 * scale);
   ctx.beginPath();
@@ -439,54 +460,67 @@ async function sendChunks(characteristic, data) {
   }
 }
 
-export async function printInvoiceEscPos(characteristic, order) {
+export async function printInvoiceEscPos(characteristic, order, settings = {}) {
   if (!characteristic) throw new Error('Bluetooth printer is not connected.');
+
+  const {
+    storeName = 'PAWFIT DESK',
+    showStoreName = true,
+    showBuyerName = true,
+    showUsername = true,
+    showTime = true,
+    showCode = true,
+    showPrice = true,
+    showFooter = true,
+    footerText = 'Thank you for shopping!\n'
+  } = settings;
 
   const encoder = new TextEncoder();
   const ESC = 0x1B;
   const GS = 0x1D;
 
+  const parts = [];
+
   const initCmds = new Uint8Array([ESC, 0x40, ESC, 0x61, 0x01]);
-  const header = encoder.encode("PAWFIT DESK\nINVOICE\n");
-  const divider = encoder.encode("--------------------------------\n");
+  parts.push(initCmds);
+
+  if (showStoreName && storeName.trim()) {
+    parts.push(encoder.encode(`${storeName.trim().toUpperCase()}\nINVOICE\n--------------------------------\n`));
+  }
 
   const leftAlign = new Uint8Array([ESC, 0x61, 0x00]);
+  parts.push(leftAlign);
 
-  // Bold Buyer and Username details
   const boldOn = new Uint8Array([ESC, 0x45, 0x01]);
   const boldOff = new Uint8Array([ESC, 0x45, 0x00]);
-  const buyerDetails = encoder.encode(
-    `BUYER: ${order.name || 'Anonymous'}\n` +
-    `USER:  ${order.username || ''}\n` +
-    `TIME:  ${order.time || ''}\n`
-  );
 
-  // Large Bold CODE and PRICE
-  const bigFontOn = new Uint8Array([ESC, 0x45, 0x01, GS, 0x21, 0x11]);
-  const codeInfo = encoder.encode(
-    `CODE:  ${order.code}\n` +
-    `PRICE: P${order.amount}\n`
-  );
-  const bigFontOff = new Uint8Array([ESC, 0x45, 0x00, GS, 0x21, 0x00]);
+  let buyerText = '';
+  if (showBuyerName) buyerText += `BUYER: ${order.name || 'Anonymous'}\n`;
+  if (showUsername) buyerText += `USER:  ${order.username || ''}\n`;
+  if (showTime) buyerText += `TIME:  ${order.time || ''}\n`;
 
-  const footer = encoder.encode("--------------------------------\nThank you for shopping!\n");
+  if (buyerText) {
+    parts.push(boldOn, encoder.encode(buyerText), boldOff);
+  }
+
+  let codePriceText = '';
+  if (showCode) codePriceText += `CODE:  ${order.code}\n`;
+  if (showPrice) codePriceText += `PRICE: P${order.amount}\n`;
+
+  if (codePriceText) {
+    const bigFontOn = new Uint8Array([ESC, 0x45, 0x01, GS, 0x21, 0x11]);
+    const bigFontOff = new Uint8Array([ESC, 0x45, 0x00, GS, 0x21, 0x00]);
+    parts.push(bigFontOn, encoder.encode(codePriceText), bigFontOff);
+  }
+
+  if (showFooter && footerText.trim()) {
+    parts.push(encoder.encode(`--------------------------------\n${footerText.trim()}\n`));
+  }
+
   const feedCmd = new Uint8Array([ESC, 0x64, 0x04]);
+  parts.push(feedCmd);
 
-  const fullPayload = concatenateUint8Arrays([
-    initCmds,
-    header,
-    divider,
-    leftAlign,
-    boldOn,
-    buyerDetails,
-    boldOff,
-    bigFontOn,
-    codeInfo,
-    bigFontOff,
-    footer,
-    feedCmd
-  ]);
-
+  const fullPayload = concatenateUint8Arrays(parts);
   await sendChunks(characteristic, fullPayload);
 }
 
