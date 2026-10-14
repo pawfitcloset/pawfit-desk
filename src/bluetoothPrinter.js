@@ -184,38 +184,6 @@ export async function printTest(printer) {
 // ─── NIIMBOT Specific Printing ────────────────────────────────────────────────
 
 /**
- * Draws a cute filled paw print centered at (cx, cy) with a given size.
- * size ≈ diameter of the main pad in px.
- */
-function drawPawPrint(ctx, cx, cy, size) {
-  ctx.save();
-  ctx.fillStyle = '#000000';
-
-  // Main heart-shaped pad (two overlapping ellipses + a triangle)
-  const pw = size * 0.55;
-  const ph = size * 0.42;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy + size * 0.08, pw, ph, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Four small round toe pads arranged in an arc above the main pad
-  const toes = [
-    { dx: -size * 0.44, dy: -size * 0.18 },
-    { dx: -size * 0.16, dy: -size * 0.40 },
-    { dx:  size * 0.16, dy: -size * 0.40 },
-    { dx:  size * 0.44, dy: -size * 0.18 },
-  ];
-  const tr = size * 0.19;
-  for (const t of toes) {
-    ctx.beginPath();
-    ctx.ellipse(cx + t.dx, cy + t.dy, tr, tr * 0.85, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.restore();
-}
-
-/**
  * Auto-fit text within maxWidth — shrinks font size until it fits.
  * Returns the final pixel size used.
  */
@@ -232,18 +200,19 @@ function autoFitText(ctx, text, fontStyle, baseSize, scale, maxWidth) {
 /**
  * Prints a high-resolution label sticker on NIIMBOT B1 / B1 Pro / B21 / D110
  *
- * Layout (top → bottom):
+ * Layout:
  *   ┌──────────────────────────────────┐
- *   │  🐾  PAWFIT CLOSET  🐾           │  ← header with paw prints
+ *   │        PAWFIT CLOSET             │
  *   ├──────────────────────────────────┤
- *   │  [Big paw]  Maria Santos         │  ← HUGE buyer name (no bold label)
- *   │             @mariasantos         │  ← username line (large, not bold)
- *   │             10:35 AM             │  ← time (small, right of user)
+ *   │  Buyer: Maria Santos             │  ← large, not bold
+ *   │  @mariasantos          10:35 AM  │  ← username, time right-aligned
  *   ├╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌┤
- *   │  CODE:   23          (box)       │  ← code in smaller bold box
- *   │  PRICE:  P129                    │
+ *   │ ╭──────────────────────────────╮ │
+ *   │ │ CODE    23                   │ │
+ *   │ │ PRICE   P129                 │ │
+ *   │ ╰──────────────────────────────╯ │
  *   ├──────────────────────────────────┤
- *   │  Thank you for shopping! 🐾      │  ← footer
+ *   │      Thank you for shopping!     │
  *   └──────────────────────────────────┘
  */
 export async function printInvoiceNiimbot(client, order) {
@@ -268,49 +237,44 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.fillStyle = '#000000';
   ctx.strokeStyle = '#000000';
 
-  // ── 1. Header Row: paw + "PAWFIT CLOSET" + paw ──────────────────────────────
-  const headerPawSize = Math.round(12 * scale);
-  drawPawPrint(ctx, Math.round(20 * scale), Math.round(16 * scale), headerPawSize);
-  drawPawPrint(ctx, width - Math.round(20 * scale), Math.round(16 * scale), headerPawSize);
-
+  // ── 1. Header: PAWFIT CLOSET ─────────────────────────────────────────────────
   ctx.textAlign = 'center';
-  ctx.font = `bold ${Math.round(17 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(22 * scale));
+  ctx.font = `bold ${Math.round(18 * scale)}px Arial, Helvetica, sans-serif`;
+  ctx.fillText('PAWFIT CLOSET', width / 2, Math.round(23 * scale));
 
-  // Thick divider under header
   ctx.lineWidth = Math.round(2.5 * scale);
   ctx.beginPath();
-  ctx.moveTo(Math.round(8 * scale), Math.round(30 * scale));
-  ctx.lineTo(width - Math.round(8 * scale), Math.round(30 * scale));
+  ctx.moveTo(Math.round(8 * scale), Math.round(31 * scale));
+  ctx.lineTo(width - Math.round(8 * scale), Math.round(31 * scale));
   ctx.stroke();
 
-  // ── 2. Large Paw Print (decorative, left side of buyer section) ──────────────
-  const bigPaw = Math.round(30 * scale);
-  drawPawPrint(ctx, Math.round(26 * scale), Math.round(62 * scale), bigPaw);
-
-  // ── 3. BUYER NAME — Big, not bold ────────────────────────────────────────────
+  // ── 2. Buyer Name — large, not bold, with "Buyer:" prefix ────────────────────
   ctx.textAlign = 'left';
-  const maxBuyerWidth = width - Math.round(62 * scale); // leave room for paw on left
-  const buyerName = order.name || 'Anonymous';
-  autoFitText(ctx, buyerName, 'normal', 28, scale, maxBuyerWidth);
-  ctx.fillText(buyerName, Math.round(56 * scale), Math.round(55 * scale));
+  const padL = Math.round(14 * scale);
+  const maxW = width - Math.round(28 * scale);
 
-  // ── 4. USERNAME — Large, not bold, slightly smaller than name ────────────────
+  const buyerLabel = 'Buyer: ';
+  const buyerName = order.name || 'Anonymous';
+  const fullBuyer = `${buyerLabel}${buyerName}`;
+  autoFitText(ctx, fullBuyer, 'normal', 26, scale, maxW);
+  ctx.fillText(fullBuyer, padL, Math.round(58 * scale));
+
+  // ── 3. Username — large, not bold ────────────────────────────────────────────
   const username = (order.username || '').replace(/^@+/, '');
-  if (username) {
-    const maxUserWidth = width - Math.round(62 * scale);
-    autoFitText(ctx, `@${username}`, 'normal', 19, scale, maxUserWidth);
-    ctx.fillText(`@${username}`, Math.round(56 * scale), Math.round(82 * scale));
+  const displayUser = username ? `@${username}` : '';
+  if (displayUser) {
+    autoFitText(ctx, displayUser, 'normal', 18, scale, maxW - Math.round(60 * scale));
+    ctx.fillText(displayUser, padL, Math.round(82 * scale));
   }
 
-  // ── 5. Time (small, right-aligned) ──────────────────────────────────────────
+  // ── 4. Time — small, right-aligned ───────────────────────────────────────────
   const orderTime = order.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   ctx.textAlign = 'right';
   ctx.font = `normal ${Math.round(11 * scale)}px Arial, Helvetica, sans-serif`;
-  ctx.fillText(orderTime, width - Math.round(10 * scale), Math.round(82 * scale));
+  ctx.fillText(orderTime, width - Math.round(12 * scale), Math.round(82 * scale));
   ctx.textAlign = 'left';
 
-  // Thin dotted-style divider between buyer and code sections
+  // ── Dashed divider ───────────────────────────────────────────────────────────
   ctx.lineWidth = Math.round(1 * scale);
   ctx.setLineDash([Math.round(4 * scale), Math.round(3 * scale)]);
   ctx.beginPath();
@@ -319,15 +283,14 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // ── 6. CODE & PRICE — in a solid-border box, smaller than buyer name ─────────
+  // ── 5. Rounded box for CODE & PRICE ─────────────────────────────────────────
   ctx.lineWidth = Math.round(2 * scale);
   const boxX = Math.round(8 * scale);
   const boxY = Math.round(104 * scale);
   const boxW = width - Math.round(16 * scale);
   const boxH = Math.round(106 * scale);
-
-  // Rounded corner rect approximation
   const r = Math.round(6 * scale);
+
   ctx.beginPath();
   ctx.moveTo(boxX + r, boxY);
   ctx.lineTo(boxX + boxW - r, boxY);
@@ -341,30 +304,26 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.closePath();
   ctx.stroke();
 
-  // CODE label (small caps label) + value
+  // CODE row
   ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText('CODE', Math.round(22 * scale), boxY + Math.round(28 * scale));
+  autoFitText(ctx, String(order.code), 'bold', 24, scale, boxW - Math.round(80 * scale));
+  ctx.fillText(String(order.code), Math.round(84 * scale), boxY + Math.round(30 * scale));
 
-  ctx.font = `bold ${Math.round(24 * scale)}px Arial, Helvetica, sans-serif`;
-  // autofit code value in case it's long
-  autoFitText(ctx, order.code, 'bold', 24, scale, boxW - Math.round(80 * scale));
-  ctx.fillText(order.code, Math.round(80 * scale), boxY + Math.round(30 * scale));
-
-  // Thin inner divider
+  // Inner divider
   ctx.lineWidth = Math.round(1 * scale);
   ctx.beginPath();
   ctx.moveTo(boxX + Math.round(6 * scale), boxY + Math.round(42 * scale));
   ctx.lineTo(boxX + boxW - Math.round(6 * scale), boxY + Math.round(42 * scale));
   ctx.stroke();
 
-  // PRICE label + value
+  // PRICE row
   ctx.font = `bold ${Math.round(13 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText('PRICE', Math.round(22 * scale), boxY + Math.round(72 * scale));
-
   ctx.font = `bold ${Math.round(24 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText(`P${order.amount}`, Math.round(84 * scale), boxY + Math.round(74 * scale));
 
-  // ── 7. Footer: thank you + small paw prints ───────────────────────────────────
+  // ── 6. Footer ────────────────────────────────────────────────────────────────
   const footerY = Math.round(232 * scale);
 
   ctx.lineWidth = Math.round(1.5 * scale);
@@ -372,11 +331,6 @@ export async function printInvoiceNiimbot(client, order) {
   ctx.moveTo(Math.round(8 * scale), Math.round(222 * scale));
   ctx.lineTo(width - Math.round(8 * scale), Math.round(222 * scale));
   ctx.stroke();
-
-  // tiny paw prints flanking the footer text
-  const footerPaw = Math.round(9 * scale);
-  drawPawPrint(ctx, Math.round(18 * scale), footerY - Math.round(4 * scale), footerPaw);
-  drawPawPrint(ctx, width - Math.round(18 * scale), footerY - Math.round(4 * scale), footerPaw);
 
   ctx.textAlign = 'center';
   ctx.font = `normal ${Math.round(10 * scale)}px Arial, Helvetica, sans-serif`;
@@ -430,11 +384,7 @@ export async function testPrintNiimbot(client) {
   ctx.fillStyle = '#000000';
   ctx.strokeStyle = '#000000';
 
-  // Header paw prints + title
-  const hp = Math.round(12 * scale);
-  drawPawPrint(ctx, Math.round(18 * scale), Math.round(18 * scale), hp);
-  drawPawPrint(ctx, width - Math.round(18 * scale), Math.round(18 * scale), hp);
-
+  // Header title
   ctx.textAlign = 'center';
   ctx.font = `bold ${Math.round(20 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText('PAWFIT DESK', width / 2, Math.round(24 * scale));
@@ -445,8 +395,7 @@ export async function testPrintNiimbot(client) {
   ctx.lineTo(width - Math.round(12 * scale), Math.round(32 * scale));
   ctx.stroke();
 
-  // Big central paw
-  drawPawPrint(ctx, width / 2, Math.round(75 * scale), Math.round(35 * scale));
+
 
   ctx.font = `bold ${Math.round(14 * scale)}px Arial, Helvetica, sans-serif`;
   ctx.fillText(`${meta?.model || 'NIIMBOT B1 PRO'} CONNECTED ✓`, width / 2, Math.round(122 * scale));
