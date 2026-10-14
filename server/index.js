@@ -118,12 +118,32 @@ function loadOAuth2Client() {
       oauth2Client.setCredentials(token);
       sheetsService = google.sheets({ version: 'v4', auth: oauth2Client });
       console.log('[Google Sheets] Loaded saved OAuth token.');
+
+      // Fetch user profile on startup
+      (async () => {
+        try {
+          const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+          const { data } = await oauth2.userinfo.get();
+          googleUser = { email: data.email, name: data.name, picture: data.picture };
+          console.log('[Google Sheets] Authenticated account:', googleUser.email);
+        } catch (e) {
+          console.warn('[Google Sheets] Could not fetch user on startup:', e.message);
+        }
+      })();
     } else if (process.env.GOOGLE_TOKEN_JSON) {
       try {
         const token = JSON.parse(process.env.GOOGLE_TOKEN_JSON);
         oauth2Client.setCredentials(token);
         sheetsService = google.sheets({ version: 'v4', auth: oauth2Client });
         console.log('[Google Sheets] Loaded OAuth token from GOOGLE_TOKEN_JSON env var.');
+        (async () => {
+          try {
+            const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+            const { data } = await oauth2.userinfo.get();
+            googleUser = { email: data.email, name: data.name, picture: data.picture };
+            console.log('[Google Sheets] Authenticated account:', googleUser.email);
+          } catch (e) {}
+        })();
       } catch (e) {
         console.error('[Google Sheets] Error parsing GOOGLE_TOKEN_JSON:', e.message);
       }
@@ -150,7 +170,7 @@ app.get('/auth/google-url', (req, res) => {
   const url = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: SCOPES,
-    prompt: 'consent'
+    prompt: 'consent select_account'
   });
   res.json({ url });
 });
@@ -177,10 +197,16 @@ app.get('/oauth2callback', async (req, res) => {
       console.warn('[Google] Could not fetch user profile:', e.message);
     }
 
+    // Reset activeSpreadsheetId so the new account does NOT inherit the old account's sheet
+    activeSpreadsheetId = null;
+    if (fs.existsSync(SPREADSHEET_ID_PATH)) {
+      try { fs.unlinkSync(SPREADSHEET_ID_PATH); } catch (e) {}
+    }
+
     io.emit('google-auth-success', { user: googleUser });
     res.send(`<html><body style="font-family:sans-serif;background:#050505;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;flex-direction:column;gap:12px">
 <h2 style="margin:0">✅ Google connected!</h2>
-<p style="color:#aaa;margin:0;font-size:14px">You can close this tab.</p>
+<p style="color:#aaa;margin:0;font-size:14px">Logged in as ${googleUser?.email || 'Google User'}. You can close this tab.</p>
 <script>
   // Tell the parent window auth succeeded (more reliable than socket.io across popups)
   if (window.opener) {
@@ -210,7 +236,9 @@ app.post('/auth/google-disconnect', async (req, res) => {
     }
     sheetsService = null;
     googleUser = null;
+    activeSpreadsheetId = null;
     if (fs.existsSync(TOKEN_PATH)) fs.unlinkSync(TOKEN_PATH);
+    if (fs.existsSync(SPREADSHEET_ID_PATH)) fs.unlinkSync(SPREADSHEET_ID_PATH);
     console.log('[Google Sheets] Disconnected.');
     res.json({ ok: true });
   } catch (err) {
@@ -289,17 +317,32 @@ function getDailyDateInfo(dateObj = new Date()) {
 
 /**
  * Gets or creates today's Google Spreadsheet file.
- * Each day has its own file named "tiktok sales-MM.DD.YY"
- * with two tabs inside: "buyer summary" and "raw orders".
- * Returns the spreadsheetId for today.
+ * Keyed by the logged-in Google account (e.g. pawfitcloset@gmail.com)
+ * so each account gets its own spreadsheets created directly in its own Drive.
  */
 async function ensureDailySpreadsheet(dateObj = new Date()) {
   if (!sheetsService) throw new Error('Not authenticated with Google Sheets.');
 
+  // Ensure current user email is known
+  if (!googleUser || !googleUser.email) {
+    try {
+      const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client });
+      const { data } = await oauth2.userinfo.get();
+      googleUser = { email: data.email, name: data.name, picture: data.picture };
+    } catch (e) {
+      console.warn('[Google Sheets] Could not get user email:', e.message);
+    }
+  }
+
+  const userKey = (googleUser?.email || 'default').toLowerCase().trim();
   const { key, title } = getDailyDateInfo(dateObj);
 
-  // Check if we already created a spreadsheet file for this date
-  const existingId = dailyRegistry[key];
+  if (!dailyRegistry[userKey] || typeof dailyRegistry[userKey] !== 'object') {
+    dailyRegistry[userKey] = {};
+  }
+
+  // Check if we already created a spreadsheet file for this user and this date
+  const existingId = dailyRegistry[userKey][key];
   if (existingId) {
     try {
       const meta = await sheetsService.spreadsheets.get({ spreadsheetId: existingId });
@@ -324,14 +367,14 @@ async function ensureDailySpreadsheet(dateObj = new Date()) {
       saveSpreadsheetId(existingId);
       return existingId;
     } catch (err) {
-      console.warn(`[Google Sheets] Daily spreadsheet for ${key} (${existingId}) not accessible: ${err.message}. Creating fresh spreadsheet file.`);
-      delete dailyRegistry[key];
+      console.warn(`[Google Sheets] Spreadsheet for ${userKey} date ${key} (${existingId}) not accessible: ${err.message}. Creating fresh file in ${userKey}'s Drive.`);
+      delete dailyRegistry[userKey][key];
       saveDailyRegistry();
     }
   }
 
-  // Create brand new Google Spreadsheet file named e.g. "tiktok sales-10.14.26"
-  console.log(`[Google Sheets] Generating new spreadsheet file: "${title}" for date ${key}`);
+  // Create brand new Google Spreadsheet file directly in the logged-in user's Drive
+  console.log(`[Google Sheets] Creating new spreadsheet "${title}" inside account ${userKey}...`);
   const created = await sheetsService.spreadsheets.create({
     requestBody: {
       properties: { title },
@@ -343,7 +386,7 @@ async function ensureDailySpreadsheet(dateObj = new Date()) {
   });
 
   const spreadsheetId = created.data.spreadsheetId;
-  console.log(`[Google Sheets] Created new spreadsheet file "${title}" -> ID: ${spreadsheetId}`);
+  console.log(`[Google Sheets] Created spreadsheet "${title}" in ${userKey}'s Google Drive -> ID: ${spreadsheetId}`);
 
   // Initialize header rows on both tabs
   await sheetsService.spreadsheets.values.batchUpdate({
@@ -357,7 +400,7 @@ async function ensureDailySpreadsheet(dateObj = new Date()) {
     }
   });
 
-  dailyRegistry[key] = spreadsheetId;
+  dailyRegistry[userKey][key] = spreadsheetId;
   saveDailyRegistry();
   activeSpreadsheetId = spreadsheetId;
   saveSpreadsheetId(spreadsheetId);
@@ -523,12 +566,15 @@ async function autoAppendOrder(order, dpAmount = 0, currentOrders = null, curren
 }
 
 app.get('/sheets/info', (req, res) => {
-  const { title } = getDailyDateInfo();
+  const { key, title } = getDailyDateInfo();
+  const userKey = (googleUser?.email || 'default').toLowerCase().trim();
+  const id = dailyRegistry[userKey]?.[key] || activeSpreadsheetId || null;
   res.json({
-    spreadsheetId: activeSpreadsheetId,
+    spreadsheetId: id,
     title,
-    url: activeSpreadsheetId
-      ? `https://docs.google.com/spreadsheets/d/${activeSpreadsheetId}/edit`
+    account: googleUser?.email || null,
+    url: id
+      ? `https://docs.google.com/spreadsheets/d/${id}/edit`
       : null
   });
 });
