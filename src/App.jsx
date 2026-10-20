@@ -40,7 +40,7 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 const socket = io(API_URL || undefined, {
-  autoConnect: false
+  autoConnect: true
 });
 
 export default function PawfitDesk() {
@@ -209,6 +209,27 @@ export default function PawfitDesk() {
       .then(data => {
         if (data && data.storeName !== undefined) {
           setPrintSettings(prev => ({ ...prev, ...data }));
+        }
+      })
+      .catch(() => {});
+
+    // Fetch existing pinned orders on mount (syncs phone with laptop data)
+    fetch(`${API_URL}/api/pinned-orders`)
+      .then(r => r.json())
+      .then(savedOrders => {
+        if (Array.isArray(savedOrders) && savedOrders.length > 0) {
+          setOrders(savedOrders);
+          setLockedCodes(savedOrders.map(o => o.code));
+        }
+      })
+      .catch(() => {});
+
+    // Fetch existing DP records on mount
+    fetch(`${API_URL}/api/dp-records`)
+      .then(r => r.json())
+      .then(savedDp => {
+        if (savedDp && typeof savedDp === 'object') {
+          setDpRecords(savedDp);
         }
       })
       .catch(() => {});
@@ -434,9 +455,35 @@ export default function PawfitDesk() {
       console.warn('Socket connection error:', err?.message || err);
     });
 
-    socket.on('tiktok-connected', (msg) => {
+    socket.on('live-status-sync', (data) => {
+      if (data) {
+        setConnectionStatus(data.status || 'offline');
+        setIsLive(data.status === 'connected');
+        if (data.targetUsername) {
+          setTargetUsername(data.targetUsername);
+        }
+      }
+    });
+
+    socket.on('recent-comments-sync', (syncedComments) => {
+      if (Array.isArray(syncedComments)) {
+        setComments(prev => {
+          const map = new Map();
+          // Keep existing comments
+          prev.forEach(c => map.set(c.id, c));
+          // Add synced comments
+          syncedComments.forEach(c => map.set(c.id, { ...c, status: c.status || 'neutral' }));
+          return Array.from(map.values()).slice(0, 100);
+        });
+      }
+    });
+
+    socket.on('tiktok-connected', (payload) => {
       setConnectionStatus('connected');
       setIsLive(true);
+      if (typeof payload === 'object' && payload.targetUsername) {
+        setTargetUsername(payload.targetUsername);
+      }
     });
 
     socket.on('tiktok-error', (msg) => {
@@ -455,8 +502,11 @@ export default function PawfitDesk() {
     });
 
     socket.on('tiktok-pinned-order', async (order) => {
-      setOrders(prev => [...prev, order]);
-      setLockedCodes(prev => [...prev, order.code]);
+      setOrders(prev => {
+        if (prev.some(o => o.id === order.id)) return prev;
+        return [...prev, order];
+      });
+      setLockedCodes(prev => (prev.includes(order.code) ? prev : [...prev, order.code]));
       setComments(prev =>
         prev.map(c =>
           c.username === order.username && c.text.includes(order.code)
@@ -480,6 +530,31 @@ export default function PawfitDesk() {
       }
     });
 
+    socket.on('order-cancelled', (payload) => {
+      if (!payload?.id) return;
+      setOrders(prev => prev.filter(o => o.id !== payload.id));
+      if (payload.code) {
+        setLockedCodes(prev => prev.filter(c => c !== payload.code));
+      }
+    });
+
+    socket.on('dp-updated', (payload) => {
+      if (payload?.username) {
+        setDpRecords(prev => ({
+          ...prev,
+          [payload.username]: payload.amount || 0
+        }));
+      }
+    });
+
+    socket.on('data-reset', () => {
+      setComments([]);
+      setOrders([]);
+      setLockedCodes([]);
+      setDpRecords({});
+      setPrintToast(null);
+    });
+
     // Google auth success from backend (popup callback)
     socket.on('google-auth-success', (payload) => {
       setGoogleConnected(true);
@@ -490,11 +565,16 @@ export default function PawfitDesk() {
 
     return () => {
       socket.off('connect_error');
+      socket.off('live-status-sync');
+      socket.off('recent-comments-sync');
       socket.off('tiktok-connected');
       socket.off('tiktok-error');
       socket.off('tiktok-disconnected');
       socket.off('tiktok-chat');
       socket.off('tiktok-pinned-order');
+      socket.off('order-cancelled');
+      socket.off('dp-updated');
+      socket.off('data-reset');
       socket.off('google-auth-success');
     };
   }, []);
@@ -553,7 +633,10 @@ export default function PawfitDesk() {
     // 2. Also notify desktop server with custom print settings
     socket.emit('print-invoice', { order: newOrder, settings: printSettingsRef.current });
 
-    // 3. Auto-append to Google Sheets (appends raw item and refreshes buyer summary)
+    // 3. Broadcast pinned order to ALL devices (phone and laptop) in real time
+    socket.emit('manual-pin-order', newOrder);
+
+    // 4. Auto-append to Google Sheets (appends raw item and refreshes buyer summary)
     appendOrderToSheet(newOrder, 0, [...orders, newOrder], dpRecords);
   };
 
@@ -627,6 +710,7 @@ export default function PawfitDesk() {
     setDpRecords({});
     setSearchTerm('');
     setPrintToast(null);
+    socket.emit('manual-reset-data');
   };
 
   const unlockCode = (codeToUnlock) => {
@@ -638,12 +722,15 @@ export default function PawfitDesk() {
     setOrders(updatedOrders);
     unlockCode(codeToUnlock);
 
-    // 1. Delete from SQLite DB
+    // 1. Broadcast cancel across all devices in real-time
+    socket.emit('manual-cancel-order', { id: orderId, code: codeToUnlock });
+
+    // 2. Delete from SQLite DB
     try {
       fetch(`${API_URL}/api/pinned-orders/${orderId}`, { method: 'DELETE' }).catch(() => {});
     } catch (e) {}
 
-    // 2. Auto-sync updated orders to Google Sheet so deleted item is removed
+    // 3. Auto-sync updated orders to Google Sheet so deleted item is removed
     if (googleConnected) {
       try {
         const res = await fetch(`${API_URL}/sheets/sync`, {
@@ -663,10 +750,23 @@ export default function PawfitDesk() {
 
   const handleDpChange = (username, value) => {
     const numValue = parseInt(value, 10);
+    const amount = isNaN(numValue) ? 0 : numValue;
     setDpRecords(prev => ({
       ...prev,
-      [username]: isNaN(numValue) ? 0 : numValue
+      [username]: amount
     }));
+
+    // Broadcast DP update to all devices in real time
+    socket.emit('manual-update-dp', { username, amount });
+
+    // Save to server SQLite DB
+    try {
+      fetch(`${API_URL}/api/dp-records`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, amount })
+      }).catch(() => {});
+    } catch (e) {}
   };
 
   const groupedOrders = useMemo(() => {

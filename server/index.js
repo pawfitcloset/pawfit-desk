@@ -24,7 +24,13 @@ db.exec(`
     amount      INTEGER,
     raw_text    TEXT,
     pinned_at   TEXT
-  )
+  );
+
+  CREATE TABLE IF NOT EXISTS dp_records (
+    username    TEXT PRIMARY KEY,
+    amount      INTEGER,
+    updated_at  TEXT
+  );
 `);
 
 console.log('SQLite database ready → orders.db');
@@ -33,11 +39,47 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Track active TikTok live session in memory
+let currentLiveSeller = null; // string e.g. "pawfit.closet"
+let currentLiveStatus = 'offline'; // 'offline' | 'connecting' | 'connected'
+let recentComments = []; // buffer of recent comments for instant sync on new device connect
+
 // REST endpoint — fetch all saved pinned orders
 app.get('/api/pinned-orders', (req, res) => {
   try {
-    const rows = db.prepare('SELECT * FROM pinned_orders ORDER BY pinned_at DESC').all();
+    const rows = db.prepare('SELECT * FROM pinned_orders ORDER BY pinned_at ASC').all();
     res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// REST endpoint — fetch all DP records
+app.get('/api/dp-records', (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM dp_records').all();
+    const map = {};
+    rows.forEach(r => { map[r.username] = r.amount; });
+    res.json(map);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// REST endpoint — save DP record
+app.post('/api/dp-records', (req, res) => {
+  const { username, amount } = req.body;
+  if (!username) return res.status(400).json({ error: 'Username required' });
+  try {
+    db.prepare(`
+      INSERT INTO dp_records (username, amount, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(username) DO UPDATE SET amount = excluded.amount, updated_at = excluded.updated_at
+    `).run(username, amount || 0, new Date().toISOString());
+
+    // Broadcast DP update to all connected devices in realtime
+    io.emit('dp-updated', { username, amount: amount || 0 });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -47,6 +89,7 @@ app.get('/api/pinned-orders', (req, res) => {
 app.delete('/api/pinned-orders/:id', (req, res) => {
   try {
     db.prepare('DELETE FROM pinned_orders WHERE id = ?').run(req.params.id);
+    io.emit('order-cancelled', { id: req.params.id });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -845,6 +888,60 @@ io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
   socket.emit('google-auth-status', { connected: !!sheetsService });
 
+  // Send initial live status and recent comments to newly connected client
+  socket.emit('live-status-sync', {
+    status: currentLiveStatus,
+    targetUsername: currentLiveSeller || ''
+  });
+
+  if (recentComments.length > 0) {
+    socket.emit('recent-comments-sync', recentComments);
+  }
+
+  // Handle manual pin from any client (phone or laptop)
+  socket.on('manual-pin-order', (order) => {
+    console.log('[MANUAL_PIN] Received order from client:', order.name, order.code);
+    try {
+      db.prepare(`
+        INSERT OR REPLACE INTO pinned_orders (id, name, username, code, amount, raw_text, pinned_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(order.id, order.name, order.username, order.code, order.amount, `${order.code} ${order.amount}`, new Date().toISOString());
+    } catch (dbErr) {
+      console.error('DB insert error:', dbErr.message);
+    }
+
+    // Broadcast to ALL connected devices (laptop & phone)
+    io.emit('tiktok-pinned-order', order);
+  });
+
+  // Handle manual order cancellation from any client
+  socket.on('manual-cancel-order', (payload) => {
+    const { id, code } = payload;
+    try {
+      db.prepare('DELETE FROM pinned_orders WHERE id = ?').run(id);
+    } catch (e) {}
+    io.emit('order-cancelled', { id, code });
+  });
+
+  // Handle manual DP update from any client
+  socket.on('manual-update-dp', (payload) => {
+    const { username, amount } = payload;
+    try {
+      db.prepare(`
+        INSERT INTO dp_records (username, amount, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(username) DO UPDATE SET amount = excluded.amount, updated_at = excluded.updated_at
+      `).run(username, amount || 0, new Date().toISOString());
+    } catch (e) {}
+    io.emit('dp-updated', { username, amount: amount || 0 });
+  });
+
+  // Handle reset data broadcast
+  socket.on('manual-reset-data', () => {
+    recentComments = [];
+    io.emit('data-reset');
+  });
+
   socket.on('print-invoice', (payload) => {
     const order = payload.order || payload;
     const clientSettings = payload.settings || null;
@@ -860,17 +957,17 @@ io.on('connection', (socket) => {
     const cleanUsername = username.replace(/^@+/, '');
     console.log(`Attempting to connect to TikTok live: @${cleanUsername}`);
 
+    currentLiveSeller = cleanUsername;
+    currentLiveStatus = 'connecting';
+    io.emit('live-status-sync', { status: 'connecting', targetUsername: cleanUsername });
+
     if (tiktokLiveConnection) {
       try { tiktokLiveConnection.disconnect(); } catch (e) {}
       tiktokLiveConnection = null;
     }
 
     try {
-      // EULER_API_KEY: required for deployed servers to avoid Euler Stream rate limits
-      // Get a free key at https://www.eulerstream.com/pricing
       const eulerApiKey = process.env.EULER_API_KEY;
-
-      // TIKTOK_SESSION_ID: optional, helps bypass TikTok IP restrictions
       const sessionId = process.env.TIKTOK_SESSION_ID;
       const sessionOpts = sessionId
         ? { session: { cookie: { sessionid: sessionId } } }
@@ -891,9 +988,17 @@ io.on('connection', (socket) => {
 
       tiktokLiveConnection.connect().then(state => {
         console.log(`[TikTok] Connected to roomId ${state.roomId}`);
-        socket.emit('tiktok-connected', `Successfully connected to @${cleanUsername}`);
+        currentLiveStatus = 'connected';
+        // Broadcast to ALL clients (phone and laptop)
+        io.emit('tiktok-connected', {
+          msg: `Successfully connected to @${cleanUsername}`,
+          targetUsername: cleanUsername
+        });
       }).catch(err => {
         console.error('[TikTok] Failed to connect:', err.message);
+        currentLiveStatus = 'offline';
+        io.emit('live-status-sync', { status: 'offline', targetUsername: cleanUsername });
+
         const errMsg = err.message || '';
         let friendlyMsg;
 
@@ -904,7 +1009,6 @@ io.on('connection', (socket) => {
           errMsg.toLowerCase().includes('sign up for a free api key') ||
           errMsg.toLowerCase().includes('too many connections')
         ) {
-          // Euler Stream signing server rate limit
           friendlyMsg = `⚠️ Euler Stream rate limit! Kailangan ng API key.\n\n1. Pumunta sa eulerstream.com/pricing\n2. Kumuha ng LIBRENG API key\n3. I-set sa Settings → "Euler API Key"\n\nError: ${errMsg}`;
         } else if (
           errMsg.includes('UserOfflineError') ||
@@ -934,12 +1038,17 @@ io.on('connection', (socket) => {
         const comment = data.comment || data.content || data.text || '';
 
         if (comment) {
-          socket.emit('tiktok-chat', {
+          const chatMsg = {
             id: data.msgId || Math.random().toString(36).substr(2, 9),
             name: nickname,
             username: `@${uniqueId}`,
             text: comment
-          });
+          };
+          recentComments.unshift(chatMsg);
+          if (recentComments.length > 100) recentComments.pop();
+
+          // Broadcast to ALL connected clients (laptop & phone)
+          io.emit('tiktok-chat', chatMsg);
         }
       };
 
@@ -959,7 +1068,6 @@ io.on('connection', (socket) => {
           return;
         }
 
-        // Match format: "23 129", "mine 23 129", "mine #23 129", "DRESS1 599"
         const orderRegex = /(?:mine|grab|take|get|pouch)?\s*#?([a-zA-Z0-9_-]+)\s+[₱pP]?\s*(\d+)/i;
         const match = text.match(orderRegex);
         if (!match) {
@@ -990,14 +1098,16 @@ io.on('connection', (socket) => {
           console.error('DB insert error:', dbErr.message);
         }
 
-        socket.emit('tiktok-pinned-order', order);
+        // Broadcast to ALL connected clients
+        io.emit('tiktok-pinned-order', order);
         printThermalInvoice(order);
         autoAppendOrder(order, 0);
       });
 
       tiktokLiveConnection.on(WebcastEvent.STREAM_END, () => {
         console.log('Stream ended.');
-        socket.emit('tiktok-disconnected', 'Stream has ended.');
+        currentLiveStatus = 'offline';
+        io.emit('tiktok-disconnected', 'Stream has ended.');
       });
 
       tiktokLiveConnection.on(ControlEvent.ERROR, ({ info, exception }) => {
@@ -1006,6 +1116,7 @@ io.on('connection', (socket) => {
 
     } catch (err) {
       console.error('Error creating connection:', err.message);
+      currentLiveStatus = 'offline';
       socket.emit('tiktok-error', `Error: ${err.message}`);
     }
   });
@@ -1014,8 +1125,9 @@ io.on('connection', (socket) => {
     if (tiktokLiveConnection) {
       try { tiktokLiveConnection.disconnect(); } catch (e) {}
       tiktokLiveConnection = null;
+      currentLiveStatus = 'offline';
       console.log('Disconnected from TikTok live');
-      socket.emit('tiktok-disconnected', 'Manually disconnected.');
+      io.emit('tiktok-disconnected', 'Manually disconnected.');
     }
   });
 
