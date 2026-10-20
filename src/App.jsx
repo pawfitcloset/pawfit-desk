@@ -25,7 +25,10 @@ import {
   Link2,
   HelpCircle,
   Settings,
-  User
+  User,
+  LogIn,
+  Mail,
+  Store
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 import { 
@@ -41,8 +44,36 @@ const socket = io(API_URL || undefined, {
 });
 
 export default function PawfitDesk() {
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const savedUser = localStorage.getItem('pawfit_active_user');
+      if (!savedUser) return null;
+      try {
+        const parsed = JSON.parse(savedUser);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            email: parsed.email || '',
+            storeName: parsed.storeName || 'Pawfit Closet'
+          };
+        }
+      } catch (e) {
+        // Fallback if previous format was string
+        return {
+          email: savedUser.includes('@') && savedUser.includes('.') ? savedUser : `${savedUser.replace('@', '')}@gmail.com`,
+          storeName: 'Pawfit Closet'
+        };
+      }
+    } catch (e) {
+      return null;
+    }
+    return null;
+  });
+
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginStoreName, setLoginStoreName] = useState('Pawfit Closet');
+
   const [isLive, setIsLive] = useState(false);
-  const [targetUsername, setTargetUsername] = useState('');
+  const [targetUsername, setTargetUsername] = useState('pawfit.closet');
   const [connectionStatus, setConnectionStatus] = useState('offline');
   
   const [comments, setComments] = useState([]);
@@ -527,7 +558,10 @@ export default function PawfitDesk() {
   };
 
   const startLive = () => {
-    if (!targetUsername.trim()) { alert("Please enter a TikTok username"); return; }
+    if (!targetUsername.trim()) {
+      alert("Please enter a TikTok username");
+      return;
+    }
     socket.connect();
     setConnectionStatus('connecting');
     socket.emit('connect-tiktok', targetUsername.trim());
@@ -537,6 +571,53 @@ export default function PawfitDesk() {
     socket.emit('disconnect-tiktok');
     setConnectionStatus('offline');
     setIsLive(false);
+  };
+
+  const handleLogin = (customEmail, customStore) => {
+    const emailToUse = (customEmail !== undefined ? customEmail : loginEmail).trim();
+    const storeToUse = (customStore !== undefined ? customStore : loginStoreName).trim() || 'Pawfit Closet';
+
+    if (!emailToUse) {
+      alert('Please enter your Gmail or Email address');
+      return;
+    }
+
+    if (!emailToUse.includes('@')) {
+      alert('Please enter a valid email address (e.g. yourname@gmail.com)');
+      return;
+    }
+
+    const sessionData = {
+      email: emailToUse,
+      storeName: storeToUse
+    };
+
+    try {
+      localStorage.setItem('pawfit_active_user', JSON.stringify(sessionData));
+    } catch (e) {
+      console.warn('Failed to save to localStorage:', e);
+    }
+
+    setCurrentUser(sessionData);
+    setLoginEmail('');
+    setLoginStoreName('Pawfit Closet');
+
+    // Also sync the store name to printSettings if provided
+    if (storeToUse) {
+      updatePrintSettings({ storeName: storeToUse });
+    }
+  };
+
+  const handleLogout = () => {
+    if (isLive) {
+      stopLive();
+    }
+    try {
+      localStorage.removeItem('pawfit_active_user');
+    } catch (e) {
+      console.warn('Failed to clear localStorage:', e);
+    }
+    setCurrentUser(null);
   };
 
   const resetData = () => {
@@ -621,6 +702,103 @@ export default function PawfitDesk() {
         .spin-slow { animation: spin-slow 1.5s linear infinite; }
       `}} />
 
+      {/* LOGIN SCREEN IF NOT LOGGED IN */}
+      {!currentUser ? (
+        <div className="flex-1 flex items-center justify-center p-4 sm:p-6 relative overflow-hidden">
+          {/* Subtle background glow effects */}
+          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl pointer-events-none"></div>
+          <div className="absolute bottom-1/4 left-1/3 -translate-x-1/2 w-80 h-80 bg-rose-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+          <div className="w-full max-w-md bg-[#0e0e10]/95 backdrop-blur-2xl border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl relative z-10 space-y-6">
+            <div className="text-center space-y-2">
+              <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-white/10 border border-white/10 text-white shadow-inner mb-1">
+                <PackageSearch size={28} className="opacity-95 text-purple-400" />
+              </div>
+              <h2 className="text-2xl font-black text-white tracking-tight">Pawfit Desk</h2>
+              <p className="text-xs sm:text-sm text-zinc-400">
+                Seller Dashboard • TikTok Live & Sticker Printing
+              </p>
+            </div>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleLogin();
+              }}
+              className="space-y-4"
+            >
+              {/* Email / Gmail Field */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
+                  <span>Gmail / Email Address</span>
+                  <span className="text-[10px] text-zinc-500">Persistent login</span>
+                </label>
+                <div className="flex items-center bg-black/60 border border-white/15 focus-within:border-purple-500/60 rounded-2xl px-3.5 py-3 transition-colors">
+                  <Mail size={16} className="text-zinc-500 mr-2.5 shrink-0" />
+                  <input
+                    type="email"
+                    placeholder="e.g. pawfit.closet@gmail.com"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    autoFocus
+                    required
+                    className="bg-transparent text-white w-full text-sm outline-none placeholder:text-zinc-600 font-medium"
+                  />
+                </div>
+              </div>
+
+              {/* Store / Display Name Field */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
+                  <span>Store / Display Name</span>
+                  <span className="text-[10px] text-zinc-500">Prints on receipts</span>
+                </label>
+                <div className="flex items-center bg-black/60 border border-white/15 focus-within:border-purple-500/60 rounded-2xl px-3.5 py-3 transition-colors">
+                  <Store size={16} className="text-zinc-500 mr-2.5 shrink-0" />
+                  <input
+                    type="text"
+                    placeholder="e.g. Pawfit Closet"
+                    value={loginStoreName}
+                    onChange={(e) => setLoginStoreName(e.target.value)}
+                    className="bg-transparent text-white w-full text-sm outline-none placeholder:text-zinc-600 font-medium"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={!loginEmail.trim()}
+                className="w-full h-11 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-40 text-white text-sm font-bold transition-all shadow-[0_0_20px_rgba(147,51,234,0.3)] flex items-center justify-center gap-2 active:scale-[0.98] mt-2 border border-purple-500/30"
+              >
+                <LogIn size={16} />
+                <span>Continue to Dashboard</span>
+              </button>
+            </form>
+
+            {/* Quick Login Shortcut */}
+            <div className="pt-2 border-t border-white/5 space-y-2 text-center">
+              <p className="text-[11px] text-zinc-500 font-medium">Quick Sign-in:</p>
+              <div className="flex justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleLogin('pawfit.closet@gmail.com', 'Pawfit Closet')}
+                  className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-semibold transition-all flex items-center gap-1.5"
+                >
+                  <Mail size={12} className="text-purple-400" />
+                  <span>pawfit.closet@gmail.com</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-1 text-center">
+              <span className="text-[10px] text-zinc-600 block">
+                Session automatically persists in localStorage across refreshes & restarts.
+              </span>
+            </div>
+          </div>
+        </div>
+      ) : (
+      <>
       {/* HEADER */}
       <header className="bg-black/60 backdrop-blur-xl border-b border-white/10 sticky top-0 z-30 px-3 sm:px-6 py-2.5 sm:py-4 shrink-0 shadow-2xl">
         <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-3">
@@ -633,6 +811,15 @@ export default function PawfitDesk() {
               <div>
                 <h1 className="text-base sm:text-xl font-bold text-white tracking-tight flex items-center gap-2">
                   Pawfit Desk
+                  {currentUser?.email && (
+                    <span className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-white/10 text-emerald-400 border border-emerald-500/30">
+                      <Mail size={11} className="text-emerald-400" />
+                      <span>{currentUser.email}</span>
+                      {currentUser.storeName && (
+                        <span className="text-zinc-400 font-normal">({currentUser.storeName})</span>
+                      )}
+                    </span>
+                  )}
                   {connectionStatus === 'connected' && (
                     <span className="flex h-2 w-2 relative ml-1">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-500 opacity-75"></span>
@@ -700,6 +887,15 @@ export default function PawfitDesk() {
                 title="User Profile & Print Settings"
               >
                 <Settings size={13} />
+              </button>
+
+              <button
+                onClick={handleLogout}
+                className="flex items-center gap-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+                title={`Logout ${currentUser?.email || ''}`}
+              >
+                <LogOut size={12} />
+                <span>Logout</span>
               </button>
             </div>
           </div>
@@ -806,6 +1002,16 @@ export default function PawfitDesk() {
               }`}
             >
               {connectionStatus === 'connecting' ? 'CONNECTING...' : (isLive ? <><Square size={13} className="fill-current"/> STOP</> : <><Play size={13} className="fill-current"/> START</>)}
+            </button>
+
+            {/* Desktop Logout Button */}
+            <button
+              onClick={handleLogout}
+              className="hidden lg:flex items-center gap-1.5 px-3 h-9 rounded-lg text-xs font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 hover:border-rose-500/30 transition-colors shrink-0"
+              title={`Logout session (${currentUser?.email || ''})`}
+            >
+              <LogOut size={13} />
+              <span>Logout</span>
             </button>
           </div>
         </div>
@@ -1390,10 +1596,10 @@ export default function PawfitDesk() {
                   )}
                   <div>
                     <p className="text-xs font-semibold text-white">
-                      {googleUser?.name || 'Local Seller Profile'}
+                      {currentUser?.storeName || googleUser?.name || 'Local Seller Profile'}
                     </p>
                     <p className="text-[11px] text-zinc-400">
-                      {googleUser?.email || (googleConnected ? 'Google Account Connected' : 'Guest / Offline Mode')}
+                      {currentUser?.email ? `Active Account: ${currentUser.email}` : (googleUser?.email || (googleConnected ? 'Google Account Connected' : 'Guest / Offline Mode'))}
                     </p>
                   </div>
                 </div>
@@ -1745,6 +1951,8 @@ export default function PawfitDesk() {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

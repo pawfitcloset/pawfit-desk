@@ -33,4 +33,5 @@ install_mingit.ps1
 Personal
 PUSH_TO_GITHUB.bat
 temp_receipt.txt
+print-settings.json
 
