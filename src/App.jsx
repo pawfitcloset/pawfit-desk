@@ -836,26 +836,26 @@ export default function PawfitDesk() {
             </div>
 
             {/* Quick Sheets & Bluetooth buttons on mobile */}
-            <div className="flex lg:hidden items-center gap-1.5">
+            <div className="flex lg:hidden items-center gap-1 shrink-0">
               {/* Mobile Bluetooth Button */}
               <button
                 onClick={btPrinter ? handleDisconnectBluetooth : handleConnectBluetooth}
                 disabled={btConnecting}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all ${
+                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold border transition-all ${
                   btPrinter
                     ? 'bg-blue-500/20 text-blue-400 border-blue-500/40 shadow-[0_0_10px_rgba(59,130,246,0.15)]'
                     : 'bg-black/60 text-zinc-400 border-white/10 hover:text-white'
                 }`}
                 title={btPrinter ? `Connected to ${btPrinter.name}. Tap to disconnect.` : 'Connect NIIMBOT / Bluetooth Printer'}
               >
-                <Bluetooth size={13} className={btPrinter ? 'text-blue-400 animate-pulse' : 'text-zinc-500'} />
-                <span>{btPrinter ? `${(btPrinter.name || 'Niimbot').slice(0, 10)} ✓` : (btConnecting ? 'Pairing...' : 'Niimbot BT')}</span>
+                <Bluetooth size={12} className={btPrinter ? 'text-blue-400 animate-pulse' : 'text-zinc-500'} />
+                <span className="text-[11px]">{btPrinter ? 'BT ✓' : (btConnecting ? '...' : 'BT')}</span>
               </button>
 
               {btPrinter && (
                 <button
                   onClick={handleTestPrintBluetooth}
-                  className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 px-2 py-1 rounded-lg text-xs"
+                  className="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 p-1 rounded-lg text-xs"
                   title="Test Print Label"
                 >
                   <Printer size={12} />
@@ -863,19 +863,11 @@ export default function PawfitDesk() {
               )}
 
               <button
-                onClick={() => setShowBtHelpModal(true)}
-                className="bg-black/60 text-zinc-400 hover:text-blue-400 border border-white/10 p-1.5 rounded-lg text-xs transition-colors"
-                title="Bluetooth & Niimbot Setup Guide"
-              >
-                <HelpCircle size={13} />
-              </button>
-
-              <button
                 onClick={() => setShowSheetsModal(true)}
-                className="flex items-center gap-1.5 bg-black/60 border border-white/10 rounded-lg px-2.5 py-1 text-xs hover:border-emerald-500/30 transition-colors"
+                className="flex items-center gap-1 bg-black/60 border border-white/10 rounded-lg px-2 py-1 text-xs hover:border-emerald-500/30 transition-colors"
                 title="Google Sheets Settings"
               >
-                <Sheet size={13} className={googleConnected ? 'text-emerald-400' : 'text-zinc-500'} />
+                <Sheet size={12} className={googleConnected ? 'text-emerald-400' : 'text-zinc-500'} />
                 <span className={`text-[11px] font-semibold ${googleConnected ? 'text-emerald-400' : 'text-zinc-400'}`}>
                   {googleConnected ? 'Sheets' : 'Link'}
                 </span>
@@ -884,24 +876,23 @@ export default function PawfitDesk() {
               <button
                 onClick={() => setShowSettingsModal(true)}
                 className="bg-black/60 text-zinc-400 hover:text-white border border-white/10 p-1.5 rounded-lg text-xs transition-colors"
-                title="User Profile & Print Settings"
+                title="Settings"
               >
                 <Settings size={13} />
               </button>
 
               <button
                 onClick={handleLogout}
-                className="flex items-center gap-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 px-2 py-1 rounded-lg text-xs font-semibold transition-colors"
+                className="flex items-center gap-1 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 p-1.5 rounded-lg text-xs font-semibold transition-colors"
                 title={`Logout ${currentUser?.email || ''}`}
               >
-                <LogOut size={12} />
-                <span>Logout</span>
+                <LogOut size={13} />
               </button>
             </div>
           </div>
           
           {/* Controls: Input, Reset, Start Live */}
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
+          <div className="flex items-center gap-2 sm:gap-3 w-full lg:w-auto">
             {/* Desktop Settings / User Profile Button */}
             <button
               onClick={() => setShowSettingsModal(true)}
@@ -973,21 +964,22 @@ export default function PawfitDesk() {
             </div>
 
             {/* TikTok username input */}
-            <div className="flex items-center bg-black border border-white/10 rounded-lg overflow-hidden h-9 flex-1 sm:w-52">
-               <span className="pl-2.5 text-zinc-500 font-bold text-xs sm:text-sm">@</span>
+            <div className="flex items-center bg-black border border-white/10 rounded-lg overflow-hidden h-9 flex-1 sm:w-52 min-w-0">
+               <span className="pl-2.5 text-zinc-500 font-bold text-xs sm:text-sm shrink-0">@</span>
                <input 
                  type="text"
                  placeholder="tiktok_username"
                  value={targetUsername}
                  onChange={(e) => setTargetUsername(e.target.value)}
                  disabled={isLive || connectionStatus === 'connecting'}
-                 className="bg-transparent text-white px-2 py-2 w-full text-xs sm:text-sm outline-none placeholder:text-zinc-600 disabled:opacity-50"
+                 className="bg-transparent text-white px-2 py-2 w-full text-xs sm:text-sm outline-none placeholder:text-zinc-600 disabled:opacity-50 min-w-0"
                />
             </div>
 
             <button 
               onClick={resetData} 
-              className="px-3 h-9 rounded-lg text-xs font-semibold bg-white/5 text-zinc-300 hover:bg-white/10 border border-white/10 transition-colors flex items-center gap-1.5"
+              className="px-2.5 sm:px-3 h-9 rounded-lg text-xs font-semibold bg-white/5 text-zinc-300 hover:bg-white/10 border border-white/10 transition-colors flex items-center gap-1 shrink-0"
+              title="Reset comments and session data"
             >
               <RefreshCw size={13} /> <span className="hidden sm:inline">Reset</span>
             </button>
@@ -995,13 +987,13 @@ export default function PawfitDesk() {
             <button 
               onClick={isLive ? stopLive : startLive}
               disabled={connectionStatus === 'connecting'}
-              className={`px-4 sm:px-6 h-9 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shadow-lg border disabled:opacity-50 shrink-0 ${
+              className={`px-3 sm:px-6 h-9 rounded-lg text-xs sm:text-sm font-bold transition-all flex items-center gap-1.5 shadow-lg border disabled:opacity-50 shrink-0 ${
                 isLive 
                   ? 'bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 border-rose-500/20' 
                   : 'bg-white text-black hover:bg-zinc-200 border-white shadow-[0_0_20px_rgba(255,255,255,0.2)]'
               }`}
             >
-              {connectionStatus === 'connecting' ? 'CONNECTING...' : (isLive ? <><Square size={13} className="fill-current"/> STOP</> : <><Play size={13} className="fill-current"/> START</>)}
+              {connectionStatus === 'connecting' ? '...' : (isLive ? <><Square size={12} className="fill-current"/> STOP</> : <><Play size={12} className="fill-current"/> START</>)}
             </button>
 
             {/* Desktop Logout Button */}
@@ -1299,26 +1291,26 @@ export default function PawfitDesk() {
 
       {/* Print Toast */}
       {printToast && (
-        <div className="fixed bottom-8 right-8 bg-black/90 backdrop-blur-md text-white p-4 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] border border-white/10 flex items-center gap-4 animate-in slide-in-from-right-8 fade-in z-50">
-          <div className="bg-white/10 text-zinc-100 p-2.5 rounded-lg border border-white/10">
+        <div className="fixed bottom-4 sm:bottom-8 left-4 right-4 sm:left-auto sm:right-8 bg-black/95 backdrop-blur-md text-white p-3.5 sm:p-4 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.7)] border border-white/15 flex items-center gap-3.5 animate-in slide-in-from-bottom-4 sm:slide-in-from-right-8 fade-in z-50">
+          <div className="bg-white/10 text-zinc-100 p-2 sm:p-2.5 rounded-lg border border-white/10 shrink-0">
             <Printer size={18} className="animate-pulse" />
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="font-semibold text-xs tracking-wide">Printing Invoice...</p>
-            <p className="text-[10px] text-zinc-400 mt-1 font-light">{printToast.name} • Code: <span className="font-medium text-emerald-400">{printToast.code}</span></p>
+            <p className="text-[11px] text-zinc-400 mt-0.5 font-light truncate">{printToast.name} • Code: <span className="font-semibold text-emerald-400">{printToast.code}</span></p>
           </div>
         </div>
       )}
 
       {/* Google Sheets Toast */}
       {sheetToast && (
-        <div className={`fixed bottom-8 left-8 backdrop-blur-md text-white p-4 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.5)] border flex items-center gap-3 animate-in slide-in-from-left-8 fade-in z-50 ${
+        <div className={`fixed bottom-4 sm:bottom-8 left-4 right-4 sm:right-auto sm:left-8 backdrop-blur-md text-white p-3 sm:p-4 rounded-xl shadow-[0_0_30px_rgba(0,0,0,0.7)] border flex items-center gap-2.5 animate-in slide-in-from-bottom-4 sm:slide-in-from-left-8 fade-in z-50 ${
           sheetToast.type === 'success'
-            ? 'bg-emerald-900/80 border-emerald-500/30'
-            : 'bg-rose-900/80 border-rose-500/30'
+            ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200'
+            : 'bg-rose-950/90 border-rose-500/40 text-rose-200'
         }`}>
-          <Sheet size={16} className={sheetToast.type === 'success' ? 'text-emerald-400' : 'text-rose-400'} />
-          <p className="text-xs font-semibold">{sheetToast.msg}</p>
+          <Sheet size={16} className={`shrink-0 ${sheetToast.type === 'success' ? 'text-emerald-400' : 'text-rose-400'}`} />
+          <p className="text-xs font-semibold truncate">{sheetToast.msg}</p>
         </div>
       )}
 
