@@ -12,6 +12,7 @@ import {
   Clock, 
   PackageSearch,
   Pin,
+  PinOff,
   Sheet,
   Wifi,
   WifiOff,
@@ -326,6 +327,7 @@ export default function PawfitDesk() {
   const [btConnecting, setBtConnecting] = useState(false);
   const [showBtHelpModal, setShowBtHelpModal] = useState(false);
   const btPrinterRef = useRef(null);
+  const printedOrdersRef = useRef(new Set());
 
   useEffect(() => {
     btPrinterRef.current = btPrinter;
@@ -508,18 +510,24 @@ export default function PawfitDesk() {
       });
       setLockedCodes(prev => (prev.includes(order.code) ? prev : [...prev, order.code]));
       setComments(prev =>
-        prev.map(c =>
-          c.username === order.username && c.text.includes(order.code)
+        prev.map(c => {
+          if (order.commentId && c.id) {
+            return c.id === order.commentId ? { ...c, status: 'success' } : c;
+          }
+          // Exact code pattern check so it does not match all other comments of the buyer
+          const pattern = new RegExp(`(?:^|[#\\s])${order.code}(?:[\\s₱pP]|$)`, 'i');
+          return c.username === order.username && pattern.test(c.text)
             ? { ...c, status: 'success' }
-            : c
-        )
+            : c;
+        })
       );
       if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
       setPrintToast({ ...order });
       toastTimeoutRef.current = setTimeout(() => setPrintToast(null), 3500);
 
       // Auto-print on phone if Bluetooth printer is connected!
-      if (btPrinterRef.current) {
+      if (btPrinterRef.current && order.id && !printedOrdersRef.current.has(order.id)) {
+        printedOrdersRef.current.add(order.id);
         try {
           await printInvoice(btPrinterRef.current, order, printSettingsRef.current);
           showSheetToast('success', `Sticker Printed: ${order.name} (${order.code}) ✓`);
@@ -536,6 +544,18 @@ export default function PawfitDesk() {
       if (payload.code) {
         setLockedCodes(prev => prev.filter(c => c !== payload.code));
       }
+      setComments(prev =>
+        prev.map(c => {
+          if (payload.commentId && c.id === payload.commentId) {
+            return { ...c, status: 'neutral' };
+          }
+          if (payload.username && payload.code && c.username === payload.username) {
+            const pattern = new RegExp(`(?:^|[#\\s])${payload.code}(?:[\\s₱pP]|$)`, 'i');
+            if (pattern.test(c.text)) return { ...c, status: 'neutral' };
+          }
+          return c;
+        })
+      );
     });
 
     socket.on('dp-updated', (payload) => {
@@ -603,6 +623,7 @@ export default function PawfitDesk() {
 
     const newOrder = {
       id: Math.random().toString(36).substr(2, 9),
+      commentId: comment.id,
       name: comment.name,
       username: comment.username,
       code,
@@ -613,7 +634,7 @@ export default function PawfitDesk() {
     setOrders(prev => [...prev, newOrder]);
     setLockedCodes(prev => [...prev, code]);
     setComments(prev =>
-      prev.map(c => c.id === comment.id ? { ...c, status: 'success' } : c)
+      prev.map(c => (comment.id ? c.id === comment.id : (c.username === comment.username && c.text.includes(code))) ? { ...c, status: 'success' } : c)
     );
 
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -621,7 +642,8 @@ export default function PawfitDesk() {
     toastTimeoutRef.current = setTimeout(() => setPrintToast(null), 3500);
 
     // 1. Direct Bluetooth auto-print on phone if connected!
-    if (btPrinterRef.current) {
+    if (btPrinterRef.current && newOrder.id && !printedOrdersRef.current.has(newOrder.id)) {
+      printedOrdersRef.current.add(newOrder.id);
       printInvoice(btPrinterRef.current, newOrder, printSettingsRef.current).then(() => {
         showSheetToast('success', `Sticker Printed: ${newOrder.name} (${newOrder.code}) ✓`);
       }).catch(err => {
@@ -717,13 +739,35 @@ export default function PawfitDesk() {
     setLockedCodes(prev => prev.filter(c => c !== codeToUnlock));
   };
 
-  const cancelOrder = async (orderId, codeToUnlock) => {
+  const cancelOrder = async (orderId, codeToUnlock, commentId = null, username = null) => {
+    const targetOrder = orders.find(o => o.id === orderId);
+    const resolvedCode = codeToUnlock || targetOrder?.code;
+    const resolvedCommentId = commentId || targetOrder?.commentId;
+    const resolvedUsername = username || targetOrder?.username;
+
     const updatedOrders = orders.filter(order => order.id !== orderId);
     setOrders(updatedOrders);
-    unlockCode(codeToUnlock);
+    if (resolvedCode) unlockCode(resolvedCode);
+
+    // Revert comment status locally
+    setComments(prev =>
+      prev.map(c => {
+        if (resolvedCommentId && c.id === resolvedCommentId) return { ...c, status: 'neutral' };
+        if (resolvedUsername && resolvedCode && c.username === resolvedUsername) {
+          const pattern = new RegExp(`(?:^|[#\\s])${resolvedCode}(?:[\\s₱pP]|$)`, 'i');
+          if (pattern.test(c.text)) return { ...c, status: 'neutral' };
+        }
+        return c;
+      })
+    );
 
     // 1. Broadcast cancel across all devices in real-time
-    socket.emit('manual-cancel-order', { id: orderId, code: codeToUnlock });
+    socket.emit('manual-cancel-order', {
+      id: orderId,
+      code: resolvedCode,
+      commentId: resolvedCommentId,
+      username: resolvedUsername
+    });
 
     // 2. Delete from SQLite DB
     try {
@@ -740,11 +784,34 @@ export default function PawfitDesk() {
         });
         const data = await res.json();
         if (data.ok) {
-          showSheetToast('success', `Item deleted from Google Sheet ✓`);
+          showSheetToast('success', `Item removed from Google Sheet ✓`);
         }
       } catch (err) {
         console.warn('Failed to sync deletion to Google Sheet:', err.message);
       }
+    }
+  };
+
+  const unpinComment = (comment) => {
+    // Find matching order by commentId or username & code
+    const orderToCancel = orders.slice().reverse().find(o => {
+      if (comment.id && o.commentId === comment.id) return true;
+      if (o.username === comment.username) {
+        const pattern = new RegExp(`(?:^|[#\\s])${o.code}(?:[\\s₱pP]|$)`, 'i');
+        return pattern.test(comment.text);
+      }
+      return false;
+    });
+
+    if (orderToCancel) {
+      cancelOrder(orderToCancel.id, orderToCancel.code, comment.id, comment.username);
+      showSheetToast('info', `Unpinned: ${comment.name} (${orderToCancel.code})`);
+    } else {
+      // Revert comment visually even if not in orders list
+      setComments(prev =>
+        prev.map(c => (comment.id ? c.id === comment.id : c === comment) ? { ...c, status: 'neutral' } : c)
+      );
+      showSheetToast('info', `Unpinned comment: ${comment.name}`);
     }
   };
 
@@ -1211,18 +1278,28 @@ export default function PawfitDesk() {
                       <span className="text-zinc-500 font-light text-xs">{comment.username}</span>
                       {comment.time && <span className="text-zinc-600 font-mono text-[10px]">{comment.time}</span>}
                     </span>
-                    {comment.status === 'success'
-                      ? <span className="text-[10px] sm:text-[9px] tracking-wider bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded-md font-bold flex items-center gap-1"><Pin size={10}/>WINNER</span>
-                      : (
+                    {comment.status === 'success' ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] sm:text-[9px] tracking-wider bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 px-2.5 py-1 rounded-md font-bold flex items-center gap-1">
+                          <Pin size={10}/>WINNER
+                        </span>
                         <button
-                          onClick={() => pinComment(comment)}
-                          title="Pin as winner & print invoice"
-                          className="opacity-100 md:opacity-0 md:group-hover/comment:opacity-100 transition-opacity flex items-center gap-1 text-[11px] sm:text-[9px] tracking-wider bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 px-3 py-1.5 sm:px-2 sm:py-0.5 rounded-lg font-bold shadow-sm active:scale-95"
+                          onClick={() => unpinComment(comment)}
+                          title="Unpin / Cancel this item"
+                          className="opacity-100 md:opacity-0 md:group-hover/comment:opacity-100 transition-opacity flex items-center gap-1 text-[10px] sm:text-[9px] tracking-wider bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 px-2 py-1 rounded-md font-semibold shadow-sm active:scale-95"
                         >
-                          <Pin size={11} className="fill-amber-300"/> PIN
+                          <PinOff size={10} /> UNPIN
                         </button>
-                      )
-                    }
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => pinComment(comment)}
+                        title="Pin as winner & print invoice"
+                        className="opacity-100 md:opacity-0 md:group-hover/comment:opacity-100 transition-opacity flex items-center gap-1 text-[11px] sm:text-[9px] tracking-wider bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 px-3 py-1.5 sm:px-2 sm:py-0.5 rounded-lg font-bold shadow-sm active:scale-95"
+                      >
+                        <Pin size={11} className="fill-amber-300"/> PIN
+                      </button>
+                    )}
                   </div>
                   <p className={comment.status === 'success' ? 'text-emerald-300 font-medium' : 'text-zinc-300 font-light'}>
                     {comment.text}

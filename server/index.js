@@ -916,11 +916,11 @@ io.on('connection', (socket) => {
 
   // Handle manual order cancellation from any client
   socket.on('manual-cancel-order', (payload) => {
-    const { id, code } = payload;
+    const { id } = payload;
     try {
       db.prepare('DELETE FROM pinned_orders WHERE id = ?').run(id);
     } catch (e) {}
-    io.emit('order-cancelled', { id, code });
+    io.emit('order-cancelled', payload);
   });
 
   // Handle manual DP update from any client
